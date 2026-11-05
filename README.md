@@ -238,6 +238,7 @@ Bound in BeamNG under **Options → Controls** (search "BeamDeck"). All are unbo
 | No sound | The window must stay open; click once inside it. Check **Car audio** and the volume slider. |
 | YouTube links stop working | Update yt-dlp: `yt-dlp -U` (or the package manager's update). |
 | Android Auto: "Attaching to USB device…" on Windows | The Zadig step above (WinUSB on the `18D1 2D01` composite device). |
+| Android Auto picture only fills part of the car screen, or the game map doesn't cover Maps (Windows) | Fixed for Windows display scaling (125 %, 150 %): update BeamDeck. |
 | Android Auto: phone doesn't connect | "Add new cars to Android Auto" on the phone; try another cable or port. |
 | Multiplayer: others can't hear or see each other | Same relay address for everyone, and **Test** says "Connected". |
 | The helper doesn't start (Windows) | `%LOCALAPPDATA%\BeamDeck\helper.log` and `launcher.log` show why. |

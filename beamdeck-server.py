@@ -336,11 +336,39 @@ def win_route(exe, to_cable):
     svcl("/SetAppDefault", config["windows"]["cable_out"] if to_cable else "DefaultRenderDevice", "all", exe)
 
 
+def dhu_capture_fits():
+    """Windows: whether a capture of exactly AA_W x AA_H fits inside the head unit's window as gdigrab sees it
+    (its client size times the display scaling). Unknown (no window yet, no ctypes) counts as fitting."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        u, g = ctypes.windll.user32, ctypes.windll.gdi32
+        hwnd = u.FindWindowW(None, DHU_TITLE)
+        if not hwnd:
+            return True
+        r = wintypes.RECT()
+        u.GetClientRect(hwnd, ctypes.byref(r))
+        hdc = u.GetDC(None)
+        try:
+            sx = g.GetDeviceCaps(hdc, 118) / max(1, g.GetDeviceCaps(hdc, 8))      # DESKTOPHORZRES / HORZRES
+            sy = g.GetDeviceCaps(hdc, 117) / max(1, g.GetDeviceCaps(hdc, 10))     # DESKTOPVERTRES / VERTRES
+        finally:
+            u.ReleaseDC(None, hdc)
+        return (r.right - r.left) * sx >= AA_W and (r.bottom - r.top) * sy >= AA_H
+    except Exception:
+        return True
+
+
 def grab_args(fps=None):
     """ffmpeg input arguments for the head unit's picture: the hidden X display, or its window on Windows."""
     rate = ["-framerate", str(fps)] if fps else []
     if WINDOWS:
-        return ["-f", "gdigrab", *rate, "-draw_mouse", "0", "-i", "title=" + DHU_TITLE]
+        # The size is given explicitly: for a window, gdigrab multiplies its size by the display scaling (125 %,
+        # 150 %…), while the head unit (not DPI-aware) still draws 1280x720. Without it the picture sits in the
+        # top-left part of a larger, mostly black capture, which also throws off the Maps detection and the game
+        # map. If the window is smaller than that (resized), gdigrab would refuse the size, so it's left out then.
+        size = ["-video_size", f"{AA_W}x{AA_H}"] if dhu_capture_fits() else []
+        return ["-f", "gdigrab", *rate, "-draw_mouse", "0", *size, "-i", "title=" + DHU_TITLE]
     return ["-f", "x11grab", "-draw_mouse", "0", *rate, "-video_size", f"{AA_W}x{AA_H}", "-i", AA_DISPLAY]
 
 
