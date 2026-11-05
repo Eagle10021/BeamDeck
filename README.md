@@ -286,3 +286,7 @@ AI was used to handle troubleshooting and bug fixes in this project, as I am sti
 **BeamDeck** is an independent, community-developed open-source project and is not affiliated, associated, authorized, endorsed by, or in any way officially connected with Google, Spotify, Meta (WhatsApp), BeamNG, or any of their subsidiaries or affiliates.
 
 All product and company names, logos, brands, trademarks, and registered trademarks mentioned or displayed in this repository are the property of their respective owners. Their use in this project is strictly for descriptive, identification, and compatibility purposes ("nominative fair use") and does not imply any endorsement, sponsorship, or official relationship.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
