@@ -1,0 +1,9 @@
+[Unit]
+Description=BeamDeck video helper for BeamNG (127.0.0.1:47130)
+
+[Service]
+ExecStart=/usr/bin/python3 %h/.local/bin/beamdeck-server.py
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

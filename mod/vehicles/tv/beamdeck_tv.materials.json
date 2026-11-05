@@ -1,0 +1,23 @@
+{
+  "beamdeck_tv_screen": {
+    "name": "beamdeck_tv_screen",
+    "mapTo": "beamdeck_tv_screen",
+    "class": "Material",
+    "Stages": [
+      {
+        "baseColorFactor": [0.02, 0.02, 0.02, 1],
+        "emissive": true,
+        "emissiveFactor": [1, 1, 1],
+        "emissiveIntensityNits": 900,
+        "emissiveMap": "@beamdeck_tv",
+        "metallicFactor": 0,
+        "roughnessFactor": 0.12
+      },
+      {}, {}, {}
+    ],
+    "doubleSided": true,
+    "materialTag0": "beamng",
+    "materialTag1": "object",
+    "version": 1.5
+  }
+}

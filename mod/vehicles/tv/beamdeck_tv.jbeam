@@ -1,0 +1,314 @@
+{
+// BeamDeck TV: the stock 25" CRT TV (same nodes, beams and meshes) plus a screen panel showing what BeamDeck plays.
+// Spawn the TV with its "BeamDeck" configuration, or pick "25 Inch CRT TV (BeamDeck)" for TV type.
+"tv_25in_crt_beamdeck": {
+    "information":{
+        "authors":"BeamNG",
+        "name":"25 Inch CRT TV (BeamDeck)"
+
+    },
+    "slotType" : "tv_type",
+    "flexbodies": [
+        ["mesh", "[group]:", "nonFlexMaterials"],
+        {"deformGroup":"tv_screen", "deformMaterialBase":"tv", "deformMaterialDamaged":"tv_dmg","deformSound":"event:>Destruction>Vehicle>Glass>impact_glass_windscreen_01", "deformVolume":6},
+        ["TVfront", ["tv_front"]],
+        {"deformGroup":""},
+        ["TVfeet", ["tv_front"]],
+        ["TVback", ["tv_back"]],
+        ["TVtube", ["tv_tube"]],
+        ["TVcircuit", ["tv_circuit"]],
+        //BeamDeck: a screen panel on the glass that shows what BeamDeck plays
+        {"deformGroup":""},
+        ["BeamDeckTVscreen", ["tv_front"]],
+    ],
+    "nodes": [
+        ["id", "posX", "posY", "posZ"],
+        {"frictionCoef":1.0},
+        {"nodeMaterial":"|NM_PLASTIC"},
+        {"collision":true},
+        {"selfCollision":true},
+        {"group":"tv_front"},
+
+
+        {"nodeWeight":1.0},
+        ["t1l", 0.29, -0.2, 0.00],
+        ["t1r", -0.29, -0.2, 0.00],
+        ["t2l", 0.29, -0.05, 0.00, {"tag":"cover_2l"}],
+        ["t2r", -0.29, -0.05, 0.00, {"tag":"cover_2r"}],
+
+        ["t3l", 0.29, -0.2, 0.53],
+        ["t3r", -0.29, -0.2, 0.53],
+        ["t4l", 0.29, -0.05, 0.53, {"tag":"cover_4l"}],
+        ["t4r", -0.29, -0.05, 0.53, {"tag":"cover_4r"}],
+        ["t5", 0.00, 0.09, 0.305{"group":""}],
+        ["t5l", 0.18, 0.13, 0.0, {"tag":"cover_5l"}],
+        ["t5r", -0.18, 0.13, 0.0, {"tag":"cover_5r"}],
+        {"nodeWeight":10},
+        //screen node
+        ["tsc", 0.0, -0.22, 0.305{"group":""}],
+
+        //tube
+        {"group":"tv_tube"},
+        {"nodeWeight":2},
+        ["tu1l", 0.05, 0.1, 0.27],
+        ["tu1r", -0.05, 0.1, 0.27],
+        ["tu2", 0.0, 0.18, 0.305],
+        ["tu3", 0.0, 0.1, 0.35],
+
+        //circuitboard
+        {"group":"tv_circuit"},
+        {"nodeWeight":0.4},
+        ["c1l", 0.15, -0.07, 0.05],
+        ["c1r", -0.15, -0.07, 0.05],
+        ["c2l", 0.15, 0.12, 0.05],
+        ["c3r", -0.15, 0.12, 0.05],
+
+        //back cover
+        {"group":"tv_back"},
+        {"nodeWeight":0.4},
+        ["bc2l", 0.29, -0.05, 0.0, {"couplerTag":"cover_2l", "couplerStrength":4000, "couplerRadius":0.1, "couplerStartRadius":0.1, "couplerLock":true, "breakGroup":"cover_2l"}],
+        ["bc2r", -0.29, -0.05, 0.0, {"couplerTag":"cover_2r", "couplerStrength":4000, "couplerRadius":0.1, "couplerStartRadius":0.1, "couplerLock":true, "breakGroup":"cover_2r"}],
+        ["bc4l", 0.29, -0.05, 0.53, {"couplerTag":"cover_4l", "couplerStrength":4000, "couplerRadius":0.1, "couplerStartRadius":0.1, "couplerLock":true, "breakGroup":"cover_4l"}],
+        ["bc4r", -0.29, -0.05, 0.53, {"couplerTag":"cover_4r", "couplerStrength":4000, "couplerRadius":0.1, "couplerStartRadius":0.1, "couplerLock":true, "breakGroup":"cover_4r"}],
+        ["bc5l", 0.18, 0.13, 0.0, {"couplerTag":"cover_5l", "couplerStrength":4000, "couplerRadius":0.1, "couplerStartRadius":0.1, "couplerLock":true, "breakGroup":"cover_5l"}],
+        ["bc5r", -0.18, 0.13, 0.0, {"couplerTag":"cover_5r", "couplerStrength":4000, "couplerRadius":0.1, "couplerStartRadius":0.1, "couplerLock":true, "breakGroup":"cover_5r"}],
+        ["bc1l", 0.17, 0.25, 0.16],
+        ["bc1r", -0.17, 0.25, 0.16],
+        ["bc3l", 0.17, 0.25, 0.4],
+        ["bc3r", -0.17, 0.25, 0.4],
+        {"collision":true},
+        {"selfCollision":true},
+
+        ],
+    "beams": [
+        ["id1:", "id2:"],
+        {"beamPrecompression":1, "beamType":"|NORMAL", "beamLongBound":1, "beamShortBound":1},
+        {"beamSpring":500000,"beamDamp":100},
+        {"beamDeform":1500,"beamStrength":72000},
+        {"deformLimitExpansion":1.2},
+        {"deformLimit":1.5},
+        //front frame
+        //vertical
+        ["t1l", "t3l"],
+        ["t2l", "t4l"],
+        ["t1r", "t3r"],
+        ["t2r", "t4r"],
+        //widthwise
+        ["t1l", "t1r"],
+        ["t3l", "t3r"],
+        ["t4l", "t4r"],
+        ["t2l", "t2r"],
+        ["t5r", "t5l"],
+
+        //lengthwise
+        ["t1r", "t2r"],
+        ["t3r", "t4r"],
+        ["t1l", "t2l"],
+        ["t3l", "t4l"],
+        //crossing
+        ["t3l", "t2l"],
+        ["t4l", "t1l"],
+        ["t3r", "t2r"],
+        ["t4r", "t1r"],
+        ["t1r", "t2l"],
+        ["t1l", "t2r"],
+        ["t4r", "t3l"],
+        ["t4l", "t3r"],
+        ["t2r", "t5r"],
+        ["t5r", "t2l"],
+        ["t5l", "t2r"],
+        ["t5l", "t2l"],
+        ["t5l", "t1l"],
+        ["t5l", "t1r"],
+        ["t5r", "t1l"],
+        ["t5r", "t1r"],
+        //weak screen area crossing
+        ["t3r", "t1l"],
+        ["t3l", "t1r"],
+        ["t4l", "t2r"],
+        ["t4r", "t2l"],
+        //inner crossing
+        ["t1r", "t4l"],
+        ["t3l", "t2r"],
+        ["t2l", "t3r"],
+        ["t4r", "t1l"],
+        //bottom plastic tray thing to the front frame
+        ["t5r", "t3r"],
+        ["t5l", "t3l"],
+        ["t3r", "t5l"],
+        ["t5r", "t3l"],
+
+
+        //tube node thing
+        ["t3l", "t5"],
+        ["t5", "t3r"],
+        ["t5", "t1r"],
+        ["t5", "t1l"],
+        {"beamSpring":550000,"beamDamp":150},
+        {"beamDeform":200000,"beamStrength":8000},
+        {"breakGroup":"screen","deformGroup":"tv_screen","deformationTriggerRatio":0.3},
+        {"deformLimit":1.1},
+        //screen node - connected with break group, provides a lot of structural rididity untill breakgroup is trigger to simulate glass breaking
+        ["tsc", "t1r"],
+        ["tsc", "t1l"],
+        ["tsc", "t3l"],
+        ["tsc", "t3r"],
+        ["tsc", "t4r"],
+        ["tsc", "t4l"],
+        ["tsc", "t2l"],
+        ["tsc", "t2r"],
+        ["tsc", "t5"],
+        {"breakGroup":"","deformGroup":"","deformationTriggerRatio":""},
+        {"beamSpring":350000,"beamDamp":80},
+        {"beamDeform":2500,"beamStrength":15000},
+        //tube main shape
+        ["tu2", "tu1r"],
+        ["tu1r", "tu3"],
+        ["tu3", "tu1l"],
+        ["tu1l", "tu2"],
+        ["tu1r", "tu1l"],
+        ["tu3", "tu2"],
+        //tube attach
+        {"beamSpring":250000,"beamDamp":80},
+        {"beamDeform":200000,"beamStrength":1800},
+        {"breakGroup":"tube"},
+        ["tu1r", "t1l"],
+        ["tu1r", "t3l"],
+        ["tu1r", "t1r"],
+        ["tu1r", "t3r"],
+
+        ["tu1l", "t1l"],
+        ["tu1l", "t3l"],
+        ["tu1l", "t1r"],
+        ["tu1l", "t3r"],
+
+        ["tu3", "t1l"],
+        ["tu3", "t3l"],
+        ["tu3", "t1r"],
+        ["tu3", "t3r"],
+        {"breakGroup":""},
+
+        //circuitboard main shape
+        {"beamSpring":150000,"beamDamp":80},
+        {"beamDeform":2800,"beamStrength":15000},
+        ["c3r", "c2l"],
+        ["c2l", "c1l"],
+        ["c1l", "c1r"],
+        ["c1r", "c3r"],
+        ["c3r", "c1l"],
+        ["c2l", "c1r"],
+        {"beamSpring":150000,"beamDamp":80},
+        {"beamDeform":200000,"beamStrength":2600},
+        {"breakGroup":"board"},
+        ["c3r", "t5r"],
+        ["c2l", "t5l"],
+        ["c2l", "t5r"],
+        ["c3r", "t5l"],
+        ["c1r", "t2r"],
+        ["c1l", "t2l"],
+        ["t1l", "c1l"],
+        ["c1r", "t1r"],
+        ["c1r", "t5"],
+        ["c3r", "t5"],
+        ["t5", "c1l"],
+        ["c2l", "t5"],
+        {"breakGroup":""},
+        {"beamSpring":100000,"beamDamp":80},
+        {"beamDeform":2000,"beamStrength":17000},
+        //back
+        ["bc2r", "bc5r"],
+        ["bc2l", "bc5l"],
+        ["bc3r", "bc4r"],
+        ["bc3l", "bc4l"],
+        ["bc3r", "bc1r"],
+        ["bc1l", "bc3l"],
+        ["bc1r", "bc5r"],
+        ["bc1l", "bc5l"],
+        ["bc4r", "bc4l"],
+        ["bc3l", "bc3r"],
+        ["bc1l", "bc1r"],
+        ["bc5r", "bc5l"],
+
+        ["bc2r", "bc4r"],
+        ["bc2l", "bc4l"],
+
+        //crosses
+        ["bc4l", "bc3r"],
+        ["bc3l", "bc4r"],
+        ["bc3l", "bc1r"],
+        ["bc3r", "bc1l"],
+        ["bc1l", "bc5r"],
+        ["bc1r", "bc5l"],
+        ["bc2l", "bc5r"],
+        ["bc2r", "bc5l"],
+        ["bc2r", "bc1r"],
+        ["bc2l", "bc1l"],
+        ["bc1r", "bc4r"],
+        ["bc1l", "bc4l"],
+        ["bc5r", "bc4r"],
+        ["bc5l", "bc4l"],
+        ["bc3r", "bc2l"],
+        ["bc3l", "bc2r"],
+        ["bc5r", "bc4l"],
+        ["bc5l", "bc4r"],
+
+
+        {"deformLimit":""},
+        {"breakGroup":""},
+        {"beamPrecompression":1, "beamType":"|NORMAL", "beamLongBound":1.0, "beamShortBound":1.0}
+        ],
+
+        "triangles": [
+        ["id1:","id2:","id3:"],
+        {"dragCoef":20},
+        //Front
+                ["t3r", "t1r", "t1l"],
+        ["t1l", "t3l", "t3r"],
+        ["t3l", "t1l", "t2l"],
+        ["t2l", "t4l", "t3l"],
+        ["t3l", "t4l", "t4r"],
+        ["t4r", "t3r", "t3l"],
+        ["t4r", "t2r", "t1r"],
+        ["t1r", "t3r", "t4r"],
+        ["t1l", "t1r", "t2r"],
+        ["t2r", "t2l", "t1l"],
+        ["t2l", "t5r", "t5l"],
+        ["t2l", "t2r", "t5r"],
+        //tube
+
+        ["tu3", "tu1l", "tu2"],
+        ["tu2", "tu1l", "tu1r"],
+        ["tu1r", "tu3", "tu2"],
+
+        //board
+        ["c3r", "c1r", "c1l"],
+        ["c1l", "c2l", "c3r"],
+
+
+        //back
+        ["bc3l", "bc3r", "bc4l"],
+        ["bc3r", "bc4r", "bc4l"],
+        ["bc4l", "bc1l", "bc3l"],
+        ["bc4l", "bc2l", "bc5l"],
+        ["bc5l", "bc1l", "bc4l"],
+        ["bc4r", "bc3r", "bc1r"],
+        ["bc1r", "bc5r", "bc4r"],
+        ["bc5r", "bc2r", "bc4r"],
+        ["bc3l", "bc1l", "bc1r"],
+        ["bc1r", "bc3r", "bc3l"],
+        ["bc1l", "bc5l", "bc5r"],
+        ["bc5r", "bc1r", "bc1l"],
+        ],
+    //BeamDeck: creates the live page on the panel (BeamDeck then shows its car screen there)
+    "controller": [
+        ["fileName"],
+        ["beamdeckTV", {"name":"beamdeckTV"}],
+    ],
+    "beamdeckTV": {
+        "materialName":"@beamdeck_tv",
+        "htmlPath":"local://local/ui/beamdeck/tv.html",
+        "displayWidth":640,
+        "displayHeight":510,
+    },
+}
+}

@@ -1,0 +1,181 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" type="text/css" href="/ui/ui-vue/src/styles/other/navigator.css" />
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+  video { width: 100%; height: 100%; object-fit: contain; background: #000; display: none; }
+  #aa { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; display: none; background: #000; }
+  /* the screen material glows, so pictures are toned down to look like a real display */
+  /* the screen material glows: tone Android Auto down (window → Screen look fine-tunes on top) */
+  #aa { filter: brightness(0.5) contrast(1.25) saturate(1.3); }
+  video { filter: brightness(0.7) contrast(1.15); }
+  /* the game's own GPS map, laid over Android Auto's map pane (1280x720 layout: x 80-850, y 10-710) */
+  #gm { position: absolute; left: 6.25%; top: 1.4%; width: 60.2%; height: 97.2%; overflow: hidden;
+        border-radius: 2.5% / 4.5%; background: #1b1d22; display: none; filter: brightness(0.75); }
+  #gm.on { display: block; }
+  #gm.right { left: 67.2%; width: 32%; }       /* the small right pane (x 860-1270) when an app is open */
+  #gm.full { width: 93%; }                     /* Maps full screen (x 80-1270) */
+  /* headlights on: dimmed like a real car display at night */
+  #veil { position: absolute; inset: 0; background: #000; opacity: 0; transition: opacity 1s; pointer-events: none; }
+  body.dim #veil { opacity: 0.45; }
+  /* now playing (music without a video or Android Auto) */
+  #np { position: absolute; inset: 0; display: none; align-items: center; gap: 5%; padding: 0 6%;
+        background: radial-gradient(circle at 25% 50%, #2a1a10, #0b0b0e 70%); color: #f2efe9;
+        font-family: "Noto Sans", sans-serif; filter: brightness(0.75); }
+  #np.on { display: flex; }
+  #npArt { height: 62%; aspect-ratio: 1; border-radius: 4%; background: #222 center / cover; flex: none;
+           box-shadow: 0 1vh 4vh rgba(0,0,0,.6); }
+  #npText { flex: 1; min-width: 0; }
+  #npTitle { font-size: 9vh; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #npSub { font-size: 5.5vh; opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1vh; }
+  #npBar { height: 1.4vh; background: rgba(255,255,255,.15); border-radius: 1vh; margin-top: 5vh; overflow: hidden; }
+  #npFill { height: 100%; width: 0; background: #ff8a3d; }
+  #npTime { font-size: 4.5vh; opacity: .6; margin-top: 1.5vh; font-variant-numeric: tabular-nums; }
+  /* where a click on the screen landed */
+  .tap { position: absolute; width: 6%; aspect-ratio: 1; margin: -3% 0 0 -3%; border-radius: 50%;
+         border: 0.5vh solid #fff; box-shadow: 0 0 1vh #ff8a3d; opacity: 1; transition: opacity .7s, transform .7s; }
+  .tap.go { opacity: 0; transform: scale(1.6); }
+  #gmMap { width: 100%; height: 100%; }
+  #gmMarker { position: absolute; width: 32px; height: 32px; left: calc(50% - 16px); top: calc(62% - 16px);
+              transform: rotateX(50deg); }
+  #idle { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+          color: #777; font: 600 9vh sans-serif; letter-spacing: .1em; text-align: center; }
+</style>
+</head>
+<body>
+<div id="idle">BEAMDECK</div>
+<video id="v" muted playsinline preload="auto"></video>
+<img id="aa" alt="">
+<div id="gm">
+  <div id="gmBoot"></div>
+  <div id="gmMap"><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"></svg></div>
+  <svg id="gmMarker" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 33.867 33.867">
+    <g transform="translate(0 -263.133)"><g transform="matrix(4.53704 0 0 4.53704 -7.075 -1044.026)" stroke-width=".265">
+      <path d="M5.292 288.798l-2.646 6.614 2.646-1.322 2.646 1.322z" fill="#282828"/>
+      <path d="M5.292 288.269l-2.646 6.614 2.646-1.323 2.645 1.323z" fill="#FD6A00"/>
+    </g></g>
+  </svg>
+</div>
+<div id="np"><div id="npArt"></div><div id="npText"><div id="npTitle"></div><div id="npSub"></div>
+  <div id="npBar"><div id="npFill"></div></div><div id="npTime"></div></div></div>
+<div id="veil"></div>
+<script src="/ui/ui-vue/src/services/navigator-class.js"></script>
+<script>
+// BeamDeck car screen: video, or the live Android Auto picture. Loaded by car.html.
+// Stubs for whatever the car's own gauge/GPS controller keeps calling on this screen
+  window.onerror = function () { return true }
+  var noop = function () {}
+  window.setup = window.updateData = window.updateMode = window.updateMap = window.setUnits = noop
+  window.updateConsum = window.appendGraphConsum = noop
+  window.messageQueue = window.messageClearById = window.messageClearAll = noop
+  window.map = { updateData: noop, setData: noop, setBootscreenImage: noop }
+  var gm = document.getElementById("gm"), gmReal = null
+  function makeMap() {                         // the game's navigator, centred on the marker
+    if (gmReal || typeof bngNavigator === "undefined") return
+    gm.classList.add("on")                     // needs its size to lay out
+    gmReal = new bngNavigator({ container: "#gmMap", bootscreen: "#gmBoot",
+      offsetX: gm.clientWidth / 2, offsetY: gm.clientHeight * 0.62, pitch: 65, speedPitch: 3 })
+    window.map = gmReal
+  }
+  window.btTap = function (u, v) {
+    var t = document.createElement("div"); t.className = "tap"
+    t.style.left = (u * 100) + "%"; t.style.top = (v * 100) + "%"
+    document.body.appendChild(t)
+    setTimeout(function () { t.classList.add("go") }, 50)
+    setTimeout(function () { t.remove() }, 900)
+  }
+  // now playing: {t, a, al, d, p, z} from Lua (or false); shown when music plays without a video / Android Auto
+  var npEl = document.getElementById("np"), npInfo = null, npAt = 0
+  function fmtT(t) { t = Math.max(0, t || 0); return Math.floor(t / 60) + ":" + ("0" + Math.floor(t % 60)).slice(-2) }
+  function npRender() {
+    var show = !!(npInfo && npInfo.t) && !aaOn && !current
+    npEl.classList.toggle("on", show)
+    if (!show) return
+    var pos = npInfo.p + (npInfo.z ? 0 : (Date.now() - npAt) / 1000)
+    if (npInfo.d) pos = Math.min(pos, npInfo.d)
+    document.getElementById("npFill").style.width = (npInfo.d ? pos / npInfo.d * 100 : 0) + "%"
+    document.getElementById("npTime").textContent = fmtT(pos) + (npInfo.d ? " / " + fmtT(npInfo.d) : "")
+  }
+  window.btNow = function (n) {
+    npInfo = n || null; npAt = Date.now()
+    if (npInfo) {
+      document.getElementById("npTitle").textContent = npInfo.t
+      document.getElementById("npSub").textContent = [npInfo.a, npInfo.al].filter(Boolean).join(" · ")
+    }
+    npRender()
+  }
+  window.btCover = function (src) { document.getElementById("npArt").style.backgroundImage = src ? "url(" + src + ")" : "" }
+  setInterval(npRender, 500)
+  window.btDim = function (on) { document.body.classList.toggle("dim", !!on) }
+  // called from Lua: the game map over Android Auto's map pane
+  // pane: "left" (normal view), "right" (an app is open, map in the small pane) or "" (no map showing)
+  window.btGameMap = function (pane) {
+    if (pane === true) pane = "left"
+    if (!pane) { gm.classList.remove("on"); return }
+    var moved = gm.dataset.pane !== pane
+    gm.dataset.pane = pane
+    gm.classList.toggle("right", pane === "right")
+    gm.classList.toggle("full", pane === "full")
+    if (moved && gmReal) { gmReal = null; document.querySelector("#gmMap svg").innerHTML = "" }   // re-centre for the new size
+    makeMap(); gm.classList.add("on")
+  }
+
+  var v = document.getElementById("v"), idle = document.getElementById("idle")
+  var current = "", blobUrl = null, last = null
+
+  function showIdle(text) { idle.textContent = text; idle.style.display = "flex"; v.style.display = "none" }
+
+  // The video comes from the game's own file system (network loads are blocked in game web views).
+  // Loading it as a blob keeps seeking reliable.
+  function load(file) {
+    if (!file) { v.pause(); v.removeAttribute("src"); showIdle("BEAMDECK"); return }
+    showIdle("LOADING…")
+    fetch(file).then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob() }).then(function (b) {
+      if (file !== current) return
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
+      blobUrl = URL.createObjectURL(b)
+      v.src = blobUrl
+      idle.style.display = "none"; if (!aaOn) v.style.display = "block"
+      apply()
+    }).catch(function () { if (file === current) { current = ""; showIdle("BEAMDECK") } })
+  }
+
+  function apply() {
+    if (!last || v.readyState < 1 || aaOn) return
+    if (Math.abs(v.currentTime - last.pos) > 0.35) v.currentTime = last.pos
+    if (last.paused && !v.paused) v.pause()
+    if (!last.paused && v.paused) v.play().catch(noop)
+  }
+
+  // called from Lua ~5 times a second: {file, pos, paused}
+  window.btSync = function (d) {
+    last = d
+    if (d.file !== current) { current = d.file; load(d.file) }
+    apply()
+  }
+  v.addEventListener("loadedmetadata", apply)
+
+  // ---- Android Auto: Lua hands this page each frame (btFrame) and on/off (btAA) with queueJSUITexture.
+  // (The game's web views can't load anything from the network, so nothing is fetched here.)
+  var aaImg = document.getElementById("aa"), aaOn = false, aaBusy = false, aaLast = 0
+  function setAA(on) {
+    aaOn = on
+    aaImg.style.display = on ? "block" : "none"
+    if (on) { idle.style.display = "none"; v.style.display = "none"; if (!v.paused) v.pause() }
+    else if (current) { v.style.display = "block" } else { showIdle("BEAMDECK") }
+  }
+  aaImg.onload = aaImg.onerror = function () { aaBusy = false }
+  window.btAA = function (on) { setAA(!!on) }
+  window.btFrame = function (src) {
+    aaLast = Date.now()
+    if (!aaOn) setAA(true)
+    if (aaBusy) return                       // still decoding the last one: skip
+    aaBusy = true
+    aaImg.src = src
+  }
+  setInterval(function () { if (aaOn && Date.now() - aaLast > 3000) setAA(false) }, 1000)
+</script>
+</body>
+</html>

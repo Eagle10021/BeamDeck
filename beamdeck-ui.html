@@ -1,0 +1,1294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BeamDeck</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1c222b; --line: #2a313c; --text: #e8eaed; --dim: #8b949e;
+    --accent: #e8833a; --accent-hi: #ffa463; --ok: #4ec27a; --bad: #ff7b72;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, "Segoe UI", sans-serif; }
+  body { display: flex; flex-direction: column; height: 100vh; }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 12px 0; }
+  h1 { font-size: 16px; margin: 0; letter-spacing: .04em; }
+  h1 span { color: var(--accent); }
+  #game { margin-left: auto; font-size: 12px; color: var(--dim); display: flex; align-items: center; gap: 6px;
+    min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #game i { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); flex: none; }
+  #game.on i { background: var(--ok); }
+
+  nav { display: flex; gap: 4px; padding: 8px 12px 0; border-bottom: 1px solid var(--line); }
+  nav button { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 12px;
+    color: var(--dim); font-weight: 600; }
+  nav button:hover { background: none; color: var(--text); }
+  nav button.sel { color: var(--text); border-bottom-color: var(--accent); }
+  main { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+  section { display: none; flex-direction: column; gap: 10px; min-height: 100%; }
+  section.sel { display: flex; }
+
+  .row { display: flex; gap: 8px; align-items: center; }
+  input[type=text], input[type=password], input[type=url], textarea { flex: 1; min-width: 0; background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font: inherit; }
+  textarea { resize: vertical; min-height: 64px; }
+  input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button { background: #222a35; color: var(--text); border: 1px solid #3a4452; border-radius: 6px;
+    padding: 7px 12px; font: inherit; cursor: pointer; white-space: nowrap; }
+  button:hover { background: #2c3644; }
+  button.primary { background: var(--accent); border-color: var(--accent-hi); color: #111; font-weight: 600; }
+  button.on { background: var(--accent); border-color: var(--accent-hi); color: #111; }
+  button.icon { padding: 6px 10px; }
+  select { flex: 1; min-width: 0; background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px; font: inherit; }
+  .hint { font-size: 11px; color: var(--dim); }
+  .seg { display: flex; border: 1px solid #3a4452; border-radius: 6px; overflow: hidden; }
+  .seg button { border: none; border-radius: 0; flex: 1; }
+  label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--dim); }
+  h2 { font-size: 13px; margin: 6px 0 0; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; }
+
+  .stage { position: relative; flex: 1; min-height: 160px; background: #000; border-radius: 8px; overflow: hidden;
+    display: flex; align-items: center; justify-content: center; }
+  .stage video { width: 100%; height: 100%; object-fit: contain; }
+  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; cursor: pointer; }
+  .stage.aa canvas { display: block; }
+  .stage.aa video, .stage.aa .placeholder { display: none; }
+  .stage .placeholder { position: absolute; color: #555; font-weight: 600; letter-spacing: .12em; text-align: center; padding: 0 16px; }
+  .stage.hidden video { display: none; }
+  .toggles { display: flex; flex-wrap: wrap; gap: 8px; }
+  .look { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin-top: 6px; align-items: center; }
+  .look label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); }
+  .look input, .slider { flex: 1; min-width: 0; accent-color: var(--accent); }
+
+  /* music browser */
+  #crumbs { display: flex; gap: 4px; flex-wrap: wrap; font-size: 12px; color: var(--dim); }
+  #crumbs a { color: var(--accent-hi); cursor: pointer; }
+  #list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; overflow: auto; flex: 1; min-height: 160px; }
+  .item { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-bottom: 1px solid #1f252e; cursor: pointer; }
+  .item:hover { background: var(--panel2); }
+  .item.now { background: #2a1d12; }
+  .item img { width: 36px; height: 36px; border-radius: 4px; object-fit: cover; background: #222; flex: none; }
+  .item .t { flex: 1; min-width: 0; }
+  .item .t b, .item .t small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .t small { color: var(--dim); font-size: 12px; }
+  .item .n { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .empty { padding: 16px; color: var(--dim); text-align: center; }
+
+  /* now-playing bar */
+  footer { border-top: 1px solid var(--line); padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 6px; background: #0b0e12; }
+  .np { display: flex; align-items: center; gap: 10px; min-height: 40px; }
+  .np img { width: 40px; height: 40px; border-radius: 4px; object-fit: cover; background: #222; flex: none; }
+  .np img[src=""] { visibility: hidden; }
+  .np .t { flex: 1; min-width: 0; }
+  .np b, .np small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np small { color: var(--dim); font-size: 12px; }
+  .transport { display: flex; gap: 6px; align-items: center; }
+  #seek { flex: 1; accent-color: var(--accent); }
+  #time { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--dim); min-width: 84px; text-align: right; }
+  #vol { width: 80px; accent-color: var(--accent); }
+  #status { font-size: 12px; color: var(--dim); min-height: 1.3em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #status.err { color: var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Beam<span>Deck</span></h1>
+  <div id="game"><i></i><span>Game not connected</span></div>
+</header>
+<nav>
+  <button data-tab="play">Play</button>
+  <button data-tab="music">Music</button>
+  <button data-tab="car">Car</button>
+  <button data-tab="settings">Settings</button>
+</nav>
+
+<main>
+  <!-- ======================= PLAY: links and video ======================= -->
+  <section id="tab-play">
+    <div class="row">
+      <input id="src" type="text" placeholder="Paste a YouTube / video link, or a file path">
+      <button id="play" class="primary" title="Stream it (starts in seconds)">Play</button>
+      <button id="save" title="Download first (sites that can't stream, or offline replays)">Save</button>
+    </div>
+    <div class="row">
+      <select id="recent"><option value="">Recent…</option></select>
+      <button id="files" title="Open the saved-videos folder to delete files">Files</button>
+    </div>
+    <div class="stage" id="stage">
+      <video id="preview" muted playsinline></video>
+      <canvas id="aaView" width="1280" height="720" title="Click to tap Android Auto"></canvas>
+      <div class="placeholder" id="ph">NOTHING PLAYING</div>
+    </div>
+  </section>
+
+  <!-- ======================= MUSIC: library, Navidrome, app sound ======================= -->
+  <section id="tab-music">
+    <div class="seg" id="msrc">
+      <button data-src="lib">Library</button>
+      <button data-src="nd">Navidrome</button>
+      <button data-src="app">App sound</button>
+    </div>
+    <div id="browse" style="display:flex;flex-direction:column;gap:8px;flex:1;min-height:0">
+      <div class="row">
+        <input id="msearch" type="text" placeholder="Search songs, artists, albums">
+        <button id="shuffleAll" title="Shuffle everything shown">Shuffle</button>
+      </div>
+      <div id="crumbs"></div>
+      <div id="list"></div>
+    </div>
+    <div id="appsound" style="display:none;flex-direction:column;gap:10px">
+      <label class="field">Play this app's sound through the car
+        <div class="row">
+          <select id="appSel"><option value="">Off (sound plays normally)</option></select>
+          <button id="appRefresh" class="icon" title="Refresh the list">↻</button>
+        </div>
+      </label>
+      <div class="hint" id="appHint">Pick an app that's playing (Spotify, a music player, a browser…). Its sound moves into the car:
+        clear inside, muffled outside, with bass shake. Pick Off to give it back its normal speakers.</div>
+    </div>
+  </section>
+
+  <!-- ======================= CAR: screens, audio, shake, Android Auto ======================= -->
+  <section id="tab-car">
+    <div class="toggles">
+      <button id="tScreens" title="Show BeamDeck on the car's dash / GPS screens">Car screens</button>
+      <button id="tAudio" class="on" title="Sound comes from the car: clear inside, muffled outside">Car audio</button>
+      <button id="tPause" title="Pause when the game is paused">Pause with game</button>
+      <button id="tPreview" class="on" title="Show the video in this window">Preview</button>
+    </div>
+    <div class="row">
+      <span class="hint" style="min-width:76px">Bass shake</span>
+      <input id="shake" class="slider" type="range" min="0" max="2" step="0.1" value="1" title="How hard heavy bass shakes the doors and car (0 = off)">
+      <span id="bassMeter" class="hint" style="min-width:34px;text-align:right">0%</span>
+    </div>
+    <h2>Multiplayer (BeamMP)</h2>
+    <div class="toggles">
+      <button id="tShare" title="Other players hear your car's music, from your car">Share my music</button>
+      <button id="tShareScr" title="Other players see your car screen (video, Android Auto, now playing) on your car">Share my screen</button>
+      <button id="tVoice" title="Proximity voice chat: players nearby hear you from where you are (Settings: push to talk, microphone)">Voice chat</button>
+      <button id="tMute" title="Turns your microphone off (game control: BeamDeck: mute / unmute mic)">Mute mic</button>
+    </div>
+    <div class="row">
+      <span class="hint" style="min-width:76px">Voices</span>
+      <input id="voiceVol" class="slider" type="range" min="0" max="2" step="0.1" value="1" title="How loud other players' voices are">
+      <span id="voiceVolTxt" class="hint" style="min-width:34px;text-align:right">100%</span>
+    </div>
+    <div class="hint" id="mpStatus">Not on a BeamMP server.</div>
+    <div class="hint" id="vcStatus"></div>
+    <h2>Android Auto</h2>
+    <div class="toggles">
+      <button id="tAA" title="Show your phone's Android Auto on the car's screen (phone over adb, head unit server running)">Android Auto</button>
+      <button id="tMap" title="Draw BeamNG's own GPS map wherever Android Auto shows Google Maps">Game map</button>
+      <button id="calib" title="Click the car screen's four corners twice, from two camera positions, once per car">Set up screen</button>
+    </div>
+    <div class="hint" id="aaStatus"></div>
+    <details id="lookBox">
+      <summary class="hint" style="cursor:pointer">Screen look (Android Auto on the car screen)</summary>
+      <div class="look">
+        <label>Brightness <input type="range" id="lk_brightness" min="-0.5" max="0.5" step="0.01"></label>
+        <label>Contrast <input type="range" id="lk_contrast" min="0.5" max="2" step="0.01"></label>
+        <label>Colour <input type="range" id="lk_saturation" min="0" max="2.5" step="0.01"></label>
+        <label>Gamma <input type="range" id="lk_gamma" min="0.3" max="2" step="0.01"></label>
+        <label>Tint <input type="range" id="lk_tint" min="0.6" max="1.4" step="0.01" title="Left: less green · right: more green"></label>
+        <button id="lookReset">Reset</button>
+      </div>
+    </details>
+  </section>
+
+  <!-- ======================= SETTINGS ======================= -->
+  <section id="tab-settings">
+    <h2>Music library</h2>
+    <label class="field">Music folders (one per line)
+      <textarea id="cfFolders" placeholder="~/Music"></textarea></label>
+    <div class="row"><button id="rescan">Rescan</button><span class="hint" id="libStatus"></span></div>
+
+    <h2>Navidrome</h2>
+    <label class="field">Server address <input id="cfNdUrl" type="url" placeholder="http://server:4533"></label>
+    <div class="row">
+      <label class="field" style="flex:1">User <input id="cfNdUser" type="text"></label>
+      <label class="field" style="flex:1">Password <input id="cfNdPass" type="password" placeholder="unchanged"></label>
+    </div>
+    <div class="row"><button id="ndTest">Test</button><span class="hint" id="ndStatus"></span></div>
+
+    <h2>Android Auto</h2>
+    <label class="field">Phone connection
+      <select id="cfAaT">
+        <option value="usb">USB cable (like a real car; no developer mode needed)</option>
+        <option value="adb">Head unit server (Android Auto developer mode; works over Wi-Fi adb)</option>
+      </select></label>
+
+    <h2>Multiplayer (BeamMP)</h2>
+    <label class="field">Music relay address (everyone on the server uses the same one)
+      <input id="cfRelay" type="text" placeholder="ws://server:47140"></label>
+    <div class="row"><button id="relayTest">Test</button><span class="hint" id="relayStatus"></span></div>
+    <label class="field">Voice chat
+      <select id="cfVcMode">
+        <option value="va">Voice activation (talks when you speak)</option>
+        <option value="ptt">Push to talk (hold the game control)</option>
+      </select></label>
+    <label class="field">Microphone <select id="cfMic"><option value="">Default microphone</option></select></label>
+    <div class="row">
+      <span class="hint" style="min-width:76px">Sensitivity</span>
+      <input id="cfVa" class="slider" type="range" min="0.002" max="0.08" step="0.002" title="Voice activation: how loud you must be to be heard (the bar shows your mic level; the line is where it starts sending)">
+      <span id="vcMeter" class="hint" style="min-width:70px;font-family:monospace"></span>
+    </div>
+    <div class="hint">Game controls (Options &gt; Controls, search "BeamDeck"): push to talk, mute mic, music and voice volume.
+      Use headphones, or the others may hear themselves through your mic. These voice settings apply right away.</div>
+
+    <h2>BeamNG</h2>
+    <label class="field">User folder (empty = detect) <input id="cfUser" type="text"></label>
+    <label class="field">Browser for the BeamDeck window (empty = detect) <input id="cfBrowser" type="text" placeholder="microsoft-edge-stable, chromium, …"></label>
+    <div class="row"><button id="cfSave" class="primary">Save</button><span class="hint" id="cfStatus"></span></div>
+    <div class="hint">Settings are stored in BeamDeck's config file for this user only. Changing the BeamNG folder takes effect after restarting the helper.</div>
+  </section>
+</main>
+
+<footer>
+  <div class="np">
+    <img id="npCover" src="" alt="">
+    <div class="t"><b id="npTitle">Nothing playing</b><small id="npSub"></small></div>
+  </div>
+  <div class="transport">
+    <button id="prev" class="icon" title="Previous">⏮</button>
+    <button id="pp" class="icon" title="Play / pause (Space)">▶</button>
+    <button id="next" class="icon" title="Next">⏭</button>
+    <button id="shuf" class="icon" title="Shuffle">⇄</button>
+    <input id="seek" type="range" min="0" max="0" step="0.1" value="0">
+    <span id="time">0:00 / 0:00</span>
+    <input id="vol" type="range" min="0" max="1.5" step="0.05" value="1" title="Volume">
+  </div>
+  <div id="status">Keep this window open: the sound plays from here.</div>
+</footer>
+
+<audio id="master" preload="auto"></audio>
+
+<script>
+"use strict"
+const $ = id => document.getElementById(id)
+const master = $("master"), preview = $("preview")
+let current = null          // {kind: "video"|"track", key, title, artist, album, cover, ...}
+let ws = null, gameInfo = null, gameAt = 0
+let opts = { audio: true, pauseWithGame: false, preview: true, tab: "play", msrc: "lib", shuffle: false,
+             vol: 1, voice: true, micMuted: false, voiceMode: "va", mic: "", vaLevel: 0.012, voiceVol: 1 }
+try { Object.assign(opts, JSON.parse(localStorage.getItem("beamdeck.opts") || "{}")) } catch (e) {}
+let screensOn = false, pausedByGame = false
+
+function setStatus(msg, err) { $("status").textContent = msg; $("status").classList.toggle("err", !!err) }
+const getJSON = p => fetch(p).then(r => r.json())
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]))
+const fmt = t => { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = Math.floor(t % 60); return m + ":" + String(s).padStart(2, "0") }
+function saveOpts() { try { localStorage.setItem("beamdeck.opts", JSON.stringify(opts)) } catch (e) {} }
+
+// ---------------- tabs ----------------
+function showTab(t) {
+  opts.tab = t; saveOpts()
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("sel", b.dataset.tab === t))
+  document.querySelectorAll("main section").forEach(s => s.classList.toggle("sel", s.id === "tab-" + t))
+  if (t === "settings") loadSettings()
+}
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => showTab(b.dataset.tab))
+showTab(new URLSearchParams(location.search).get("tab") || opts.tab)
+
+// ---------------- websocket to helper ----------------
+function connect() {
+  ws = new WebSocket("ws://" + location.host + "/ws")
+  ws.binaryType = "arraybuffer"
+  ws.onopen = () => { send({ type: "frames", on: aaWant }); send({ type: "audio", on: true }) }
+  ws.onmessage = e => {
+    if (typeof e.data !== "string") {         // 'J' + JPEG frame; 'A'/'B' + 20 ms of PCM (Android Auto / app sound)
+      const kind = new Uint8Array(e.data, 0, 1)[0]
+      if (kind === 65 || kind === 66) return playPCM(e.data, kind)
+      return drawAA(new Blob([new Uint8Array(e.data, 1)], { type: "image/jpeg" }))
+    }
+    const m = JSON.parse(e.data)
+    if (m.type === "hello" || m.type === "screensState") { screensOn = !!(m.screens ?? m.on); renderToggles() }
+    else if (m.type === "game") onGame(m)
+    else if (m.type === "aa") onAA(m)
+    else if (m.type === "look") ["brightness", "contrast", "saturation", "gamma", "tint"].forEach(k => $("lk_" + k).value = m[k])
+    else if (m.type === "gamemap") { gameMapOn = m.on; $("tMap").classList.toggle("on", gameMapOn) }
+    else if (m.type === "appsound") { appKey = m.key; renderApps() }
+    else if (m.type === "pane") mapPane = m.where || ""
+    else if (m.type === "gamecmd") gameCmd(m)
+    else if (m.type === "active") { windowActive = m.on; if (!m.on) { stopSending(); stopReceiving(); stopScreen(); micStop(); stopVoiceWs() }
+      setStatus(m.on ? "Keep this window open: the sound plays from here." : "BeamDeck is open in another window: that one plays the car sound now.", !m.on) }
+    else if (m.type === "library") { if (opts.msrc === "lib" && !crumbs.length) browseHome() }
+    else if (m.type === "job" && current && m.key === current.key && m.state !== "ready") showJob(m)
+    else if (m.type === "screenfile" && current && m.key === current.key) {
+      if (m.state === "ready") { setPreview("/m/" + m.key + ".webm"); if (screensOn) setStatus("▶ " + current.title + " — on car screens") }
+      else if (m.state === "error") setStatus("Couldn't prepare the car-screen copy of this video.", true)
+    }
+  }
+  ws.onclose = () => setTimeout(connect, 1000)
+}
+connect()
+function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)) }
+
+let lastStateSent = 0
+function sendState(force) {
+  const now = performance.now()
+  if (!force && now - lastStateSent < 1000) return
+  lastStateSent = now
+  send({ type: "state", key: current && current.kind === "video" ? current.key : null, title: current ? current.title : "",
+         pos: master.currentTime || 0, paused: master.paused })
+}
+;["play", "pause", "seeked", "ratechange", "ended"].forEach(ev => master.addEventListener(ev, () => sendState(true)))
+setInterval(sendState, 1000)
+
+// ---------------- game info → car audio ----------------
+function onGame(m) {
+  gameInfo = m; gameAt = performance.now()
+  renderGame(); applyAudio(); followPreview(); sendState(); sendBass(); mpTick()
+  if (opts.pauseWithGame && current) {
+    if (m.paused && !master.paused) { pausedByGame = true; master.pause() }
+    else if (!m.paused && pausedByGame) { pausedByGame = false; master.play().catch(() => {}) }
+  }
+}
+function gameConnected() { return gameInfo && performance.now() - gameAt < 2000 }
+function renderGame() {
+  const el = $("game"), on = gameConnected()
+  el.classList.toggle("on", !!on)
+  let t = "Game not connected"
+  if (on) {
+    t = gameInfo.hasCar ? (gameInfo.vehName || "In a car") : "In game (no car)"
+    if (gameInfo.hasCar && gameInfo.screenCount != null) t += " · " + gameInfo.screenCount + " screen" + (gameInfo.screenCount === 1 ? "" : "s")
+    if (gameInfo.hasCar) t += gameInfo.inside ? " · inside" : " · outside"
+    if (gameInfo.hasCar && aaWant) t += gameInfo.calibrated ? " · screen set up" : " · screen not set up"
+  }
+  el.querySelector("span").textContent = t
+}
+setInterval(() => { renderGame(); if (!gameConnected()) applyAudio() }, 1000)
+
+let ctx = null, nodes = null
+function ensureAudio() {
+  if (ctx) { if (ctx.state === "suspended") ctx.resume(); return }
+  ctx = new AudioContext()
+  const src = ctx.createMediaElementSource(master)
+  const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 10
+  const body = ctx.createBiquadFilter(); body.type = "peaking"; body.frequency.value = 180; body.Q.value = 0.8; body.gain.value = 0
+  const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 20000; lp.Q.value = 0.5
+  const pan = ctx.createStereoPanner()
+  const gain = ctx.createGain()
+  const analyser = ctx.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.6
+  src.connect(analyser)
+  src.connect(hp); hp.connect(body); body.connect(lp); lp.connect(pan); pan.connect(gain); gain.connect(ctx.destination)
+  const pcmIn = ctx.createGain()            // Android Auto and app sound join the same chain (and the bass analyser)
+  pcmIn.connect(hp); pcmIn.connect(analyser)
+  const dry = ctx.createGain(), mpDest = ctx.createMediaStreamDestination()   // the music before the car effects,
+  src.connect(dry); pcmIn.connect(dry); dry.connect(mpDest)                   // for other players (BeamMP)
+  nodes = { hp, body, lp, pan, gain, analyser, pcmIn, mpDest, bins: new Uint8Array(analyser.frequencyBinCount) }
+  // while paused (Chromium waits for a click) the shared music would be silence: start a fresh stream once it runs
+  ctx.onstatechange = () => { if (ctx.state === "running" && mpSend && mpMe) startSending(mpMe) }
+  applyAudio()
+}
+function applyAudio() {
+  if (!nodes) return
+  const t = ctx.currentTime, k = 0.08, vol = +$("vol").value
+  let cutoff = 20000, g = 1, p = 0, bass = 0, lowcut = 10
+  const g0 = gameConnected() ? gameInfo : null
+  const tv = g0 && g0.tv
+  if (opts.audio && tv && !(g0.hasCar && (g0.inside || g0.dist <= tv.dist))) {
+    // a BeamDeck TV is nearer than the car (and the camera isn't inside it): the TV plays it, clear (no muffling), from its position
+    const d = Math.max(0, tv.dist - 1.5)
+    g = 1 / (1 + d / 8); p = (tv.pan || 0) * 0.8
+  } else if (opts.audio && g0 && g0.hasCar) {
+    if (g0.inside) { cutoff = 11000; p = g0.pan * 0.25; bass = 3; lowcut = 60 }       // cabin: door speakers
+    else {                       // outside: muffled through the body, clearer the more the car is open
+      // any opening on the listener's side (a door, a broken window) brings it up to the interior sound; the far side less
+      const d = Math.max(0, g0.dist - 1.5), o = Math.min(1, (g0.openness || 0) * 3)
+      const mCut = Math.max(250, 900 / (1 + d / 12)), mGain = 0.55 * Math.pow(1 / (1 + d / 6), 1.3)   // closed
+      const cCut = Math.max(3000, 11000 / (1 + d / 40)), cGain = 1 / (1 + d / 15)                    // open: like inside
+      cutoff = mCut * Math.pow(cCut / mCut, o)     // blend on a log scale, so half open sounds half way
+      g = mGain + (cGain - mGain) * o
+      p = g0.pan * 0.8; bass = 6 - 4 * o; lowcut = 40
+    }
+  }
+  nodes.lp.frequency.setTargetAtTime(cutoff, t, k)
+  nodes.body.gain.setTargetAtTime(bass, t, k)
+  nodes.hp.frequency.setTargetAtTime(lowcut, t, k)
+  nodes.gain.gain.setTargetAtTime(g * vol, t, k)
+  nodes.pan.pan.setTargetAtTime(p, t, k)
+}
+$("vol").value = opts.vol
+$("vol").addEventListener("input", () => { opts.vol = +$("vol").value; saveOpts(); applyAudio() })
+document.addEventListener("pointerdown", () => ensureAudio(), true)   // browsers keep sound asleep until a click
+
+// ---------------- PCM from the helper (Android Auto 'A', app sound 'B') ----------------
+const pcmNext = { 65: 0, 66: 0 }
+let pcmAt = 0
+function playPCM(buf, ch) {               // 48 kHz stereo s16le, scheduled back to back per channel
+  if (!ctx) ensureAudio()
+  if (!nodes) return
+  const pcm = new Int16Array(buf.slice(1)), frames = pcm.length / 2
+  const ab = ctx.createBuffer(2, frames, 48000), l = ab.getChannelData(0), r = ab.getChannelData(1)
+  for (let i = 0; i < frames; i++) { l[i] = pcm[2 * i] / 32768; r[i] = pcm[2 * i + 1] / 32768 }
+  const now = ctx.currentTime
+  if (pcmNext[ch] < now + 0.03 || pcmNext[ch] > now + 0.35) pcmNext[ch] = now + 0.08
+  const s = ctx.createBufferSource(); s.buffer = ab; s.connect(nodes.pcmIn); s.start(pcmNext[ch])
+  pcmNext[ch] += ab.duration
+  pcmAt = performance.now()
+}
+
+// ---------------- bass → car shake ----------------
+let slowBass = 0
+function bassLevel() {
+  const pcmSound = performance.now() - pcmAt < 500
+  if (!nodes || (!pcmSound && (master.paused || master.readyState < 3 || master.seeking))) return 0
+  nodes.analyser.getByteFrequencyData(nodes.bins)
+  const hz = ctx.sampleRate / nodes.analyser.fftSize
+  const lo = Math.max(1, Math.round(30 / hz)), hi = Math.max(lo + 1, Math.round(110 / hz))
+  let sum = 0
+  for (let i = lo; i <= hi; i++) sum += nodes.bins[i]
+  const avg = sum / (hi - lo + 1) / 255
+  slowBass += (avg - slowBass) * 0.05
+  const base = Math.max(0, (avg - 0.5) / 0.35)
+  const punch = Math.max(0, avg - slowBass - 0.04) * 5
+  return Math.min(1, Math.pow(base, 1.5) * 0.7 + punch)
+}
+function sendBass() {
+  const v = bassLevel() * +$("shake").value
+  $("bassMeter").textContent = Math.round(v * 100) + "%"
+  send({ type: "bass", v: v })
+}
+try { const sv = localStorage.getItem("beamdeck.shake"); if (sv !== null) $("shake").value = sv } catch (e) {}
+$("shake").addEventListener("change", () => { try { localStorage.setItem("beamdeck.shake", $("shake").value) } catch (e) {} })
+
+// ---------------- video preview follows the master clock ----------------
+function setPreview(src) {
+  if (!current) return
+  current.previewSrc = src
+  if (preview.getAttribute("src") !== src) preview.src = src
+  $("ph").style.display = "none"
+  followPreview()
+}
+function followPreview() {
+  if (!opts.preview || !preview.getAttribute("src") || preview.readyState < 1) return
+  const d = preview.currentTime - master.currentTime
+  if (Math.abs(d) > 0.3) preview.currentTime = master.currentTime
+  if (master.paused && !preview.paused) preview.pause()
+  if (!master.paused && preview.paused) preview.play().catch(() => {})
+}
+;["play", "pause", "seeked", "timeupdate"].forEach(ev => master.addEventListener(ev, followPreview))
+
+// ---------------- now playing + transport ----------------
+let lastNow = {}
+function setNow(np) {
+  lastNow = np
+  $("npTitle").textContent = np.title || "Nothing playing"
+  $("npSub").textContent = [np.artist, np.album].filter(Boolean).join(" · ")
+  $("npCover").src = np.cover || ""
+}
+master.addEventListener("loadedmetadata", () => { $("seek").max = master.duration || 0 })
+master.addEventListener("timeupdate", () => {
+  if (appKey) return
+  if (!seeking) $("seek").value = master.currentTime
+  $("time").textContent = fmt(master.currentTime) + " / " + fmt(master.duration)
+})
+master.addEventListener("play", () => $("pp").textContent = "❚❚")
+master.addEventListener("pause", () => $("pp").textContent = "▶")
+master.addEventListener("waiting", () => setStatus("Buffering…"))
+master.addEventListener("playing", () => current && setStatus("▶ " + current.title))
+master.addEventListener("error", () => current && setStatus(current.kind === "video" ? "Playback error — try Save instead." : "Couldn't play this song.", true))
+master.addEventListener("ended", () => { if (current && current.kind === "track") nextTrack(1) })
+let seeking = false
+$("seek").addEventListener("input", () => { seeking = true; $("time").textContent = fmt(+$("seek").value) + " / " + fmt(master.duration) })
+$("seek").addEventListener("change", () => { master.currentTime = +$("seek").value; seeking = false })
+$("pp").onclick = () => { if (!current) return; ensureAudio(); pausedByGame = false; master.paused ? master.play() : master.pause() }
+$("prev").onclick = () => { if (master.currentTime > 3 || !queue.length) master.currentTime = 0; else nextTrack(-1) }
+$("next").onclick = () => nextTrack(1)
+$("shuf").onclick = () => { opts.shuffle = !opts.shuffle; saveOpts(); $("shuf").classList.toggle("on", opts.shuffle) }
+$("shuf").classList.toggle("on", opts.shuffle)
+document.addEventListener("keydown", e => {
+  if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) && e.target.type !== "range") return
+  if (e.code === "Space") { e.preventDefault(); $("pp").click() }
+})
+
+// ---------------- music queue ----------------
+let queue = [], qi = -1
+function playTrack(t) {
+  if (appKey) { send({ type: "appsound", key: "" }); appKey = "" ; renderApps() }   // BeamDeck's own player takes over the car
+  ensureAudio()
+  current = { kind: "track", key: null, ...t }
+  preview.removeAttribute("src"); preview.load(); $("ph").style.display = ""; $("ph").textContent = "MUSIC"
+  master.src = t.src
+  master.play().then(() => setStatus("▶ " + t.title)).catch(e => setStatus("Couldn't play: " + e.message, true))
+  setNow(t)
+  send({ type: "np", title: t.title, artist: t.artist, album: t.album, dur: t.dur, cover: t.cover })
+  sendState(true)
+  renderList()
+}
+function playQueue(list, start) {
+  queue = list.slice(); qi = start
+  if (opts.shuffle) {                      // keep the chosen song first, shuffle the rest
+    const first = queue.splice(start, 1)[0]
+    for (let i = queue.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [queue[i], queue[j]] = [queue[j], queue[i]] }
+    queue.unshift(first); qi = 0
+  }
+  playTrack(queue[qi])
+}
+function nextTrack(d) {
+  if (!queue.length) return
+  qi = qi + d
+  if (qi >= queue.length || qi < 0) { qi = Math.max(0, Math.min(queue.length - 1, qi)); return master.pause() }
+  playTrack(queue[qi])
+}
+
+// ---------------- music browser (library / Navidrome) ----------------
+let crumbs = [], listItems = []          // crumbs: [{label, fn}]
+function srcBase() { return opts.msrc === "nd" ? "/nd" : "/lib" }
+function setSource(s) {
+  opts.msrc = s; saveOpts()
+  document.querySelectorAll("#msrc button").forEach(b => b.classList.toggle("on", b.dataset.src === s))
+  $("browse").style.display = s === "app" ? "none" : "flex"
+  $("appsound").style.display = s === "app" ? "flex" : "none"
+  if (s === "app") loadApps(); else browseHome()
+}
+document.querySelectorAll("#msrc button").forEach(b => b.onclick = () => setSource(b.dataset.src))
+function renderCrumbs() {
+  $("crumbs").innerHTML = crumbs.map((c, i) => i < crumbs.length - 1 ? `<a data-i="${i}">${esc(c.label)}</a> ›` : `<span>${esc(c.label)}</span>`).join(" ")
+  $("crumbs").querySelectorAll("a").forEach(a => a.onclick = () => { const c = crumbs[+a.dataset.i]; crumbs = crumbs.slice(0, +a.dataset.i); c.fn() })
+}
+function showList(items, empty) {
+  listItems = items
+  renderList(empty)
+}
+function renderList(empty) {
+  if (!listItems.length) { $("list").innerHTML = `<div class="empty">${esc(empty || "Nothing here.")}</div>`; return }
+  $("list").innerHTML = listItems.map((it, i) => `<div class="item${it.track && current && current.kind === "track" && current.id === it.track.id ? " now" : ""}" data-i="${i}">
+      ${it.img !== undefined ? `<img src="${esc(it.img)}" loading="lazy" onerror="this.style.visibility='hidden'">` : ""}
+      <div class="t"><b>${esc(it.title)}</b><small>${esc(it.sub || "")}</small></div><span class="n">${esc(it.n || "")}</span></div>`).join("")
+  $("list").querySelectorAll(".item").forEach(el => el.onclick = () => listItems[+el.dataset.i].go())
+}
+function fail(e) { showList([], e && e.error ? e.error : "Couldn't load that.") }
+function browseHome() {
+  crumbs = []
+  const base = srcBase(), label = opts.msrc === "nd" ? "Navidrome" : "Library"
+  getJSON(base + "/artists").then(arts => {
+    if (arts.error) return fail(arts)
+    crumbs = [{ label: label + " · " + arts.length + " artists", fn: browseHome }]; renderCrumbs()
+    showList(arts.map(a => ({ title: a.name, sub: a.albums + " album" + (a.albums === 1 ? "" : "s"), go: () => browseArtist(a) })),
+      opts.msrc === "nd" ? "Set up Navidrome in Settings." : "No music yet: add folders in Settings.")
+  }).catch(fail)
+}
+function browseArtist(a) {
+  const base = srcBase()
+  const q = opts.msrc === "nd" ? "?id=" + encodeURIComponent(a.id) : "?artist=" + encodeURIComponent(a.name)
+  getJSON(base + "/albums" + q).then(als => {
+    if (als.error) return fail(als)
+    crumbs = crumbs.slice(0, 1).concat([{ label: a.name, fn: () => browseArtist(a) }]); renderCrumbs()
+    showList(als.map(al => ({ title: al.album, sub: (al.year ? al.year + " · " : "") + al.tracks + " songs", img: al.cover,
+      go: () => browseAlbum(al, a) })))
+  }).catch(fail)
+}
+function browseAlbum(al, a) {
+  const base = srcBase()
+  const q = opts.msrc === "nd" ? "?id=" + encodeURIComponent(al.id) : "?album=" + encodeURIComponent(al.album) + "&artist=" + encodeURIComponent(al.artist)
+  getJSON(base + "/tracks" + q).then(ts => {
+    if (ts.error) return fail(ts)
+    crumbs = crumbs.slice(0, 2).concat([{ label: al.album, fn: () => browseAlbum(al, a) }]); renderCrumbs()
+    showTracks(ts)
+  }).catch(fail)
+}
+function showTracks(ts, empty) {
+  showList(ts.map((t, i) => ({ title: t.title, sub: t.artist + (t.album ? " · " + t.album : ""), img: t.cover, n: fmt(t.dur),
+    track: t, go: () => playQueue(ts, i) })), empty)
+}
+let searchTimer = null
+$("msearch").addEventListener("input", () => {
+  clearTimeout(searchTimer)
+  const q = $("msearch").value.trim()
+  searchTimer = setTimeout(() => {
+    if (!q) return browseHome()
+    getJSON(srcBase() + "/search?q=" + encodeURIComponent(q)).then(ts => {
+      if (ts.error) return fail(ts)
+      crumbs = [{ label: "Search: " + q, fn: () => {} }]; renderCrumbs(); showTracks(ts, "No matches.")
+    }).catch(fail)
+  }, 300)
+})
+$("shuffleAll").onclick = () => {
+  const ts = listItems.filter(it => it.track).map(it => it.track)
+  if (!ts.length) return setStatus("Open an album or search first.", true)
+  opts.shuffle = true; saveOpts(); $("shuf").classList.add("on")
+  playQueue(ts, Math.floor(Math.random() * ts.length))
+}
+
+// ---------------- app sound ----------------
+let appKey = "", appList = []
+function loadApps() {
+  getJSON("/apps").then(r => { appList = r.apps; appKey = r.selected; renderApps() }).catch(() => {})
+}
+function renderApps() {
+  const sel = $("appSel")
+  sel.innerHTML = '<option value="">Off (sound plays normally)</option>' + appList.map(a =>
+    `<option value="${esc(a.key)}">${esc(a.name)}${a.playing ? " ♪" : ""}</option>`).join("")
+  sel.value = appKey || ""
+  $("appHint").style.display = appKey ? "none" : ""
+}
+$("appSel").onchange = () => {
+  ensureAudio()
+  appKey = $("appSel").value
+  if (appKey && current && !master.paused) master.pause()      // one source at a time in the car
+  send({ type: "appsound", key: appKey })
+  setStatus(appKey ? "Playing " + $("appSel").selectedOptions[0].text.replace(" ♪", "") + " through the car." : "App sound is back on its normal speakers.")
+}
+$("appRefresh").onclick = loadApps
+setInterval(() => {                       // the app's own now-playing, from its media controls
+  if (!appKey) return
+  getJSON("/np").then(n => {
+    if (!n.title) return
+    setNow({ title: n.title, artist: n.artist, album: n.album, cover: n.cover_url || "" })
+    $("seek").max = n.dur || 0; if (!seeking) $("seek").value = n.pos || 0
+    $("time").textContent = fmt(n.pos) + " / " + fmt(n.dur)
+    $("pp").textContent = n.paused ? "▶" : "❚❚"
+  }).catch(() => {})
+  if (opts.msrc === "app") loadApps()
+}, 1500)
+setSource(opts.msrc)
+
+// ---------------- links and video ----------------
+function startPlayback(key, title, audioSrc, previewSrc) {
+  if (appKey) { send({ type: "appsound", key: "" }); appKey = ""; renderApps() }
+  current = { kind: "video", key, title }
+  queue = []; qi = -1
+  setNow({ title })
+  send({ type: "np", title: "", artist: "", album: "", dur: 0, cover: "" })   // a video shows itself on the car screen
+  preview.removeAttribute("src"); preview.load()
+  $("ph").style.display = ""; $("ph").textContent = "PREPARING VIDEO…"
+  master.src = audioSrc
+  master.play().then(() => setStatus("▶ " + title)).catch(e => setStatus("Couldn't play: " + e.message, true))
+  sendState(true)
+  if (previewSrc) setPreview(previewSrc)
+  else getJSON("/screenstatus?key=" + key).then(s => { if (s.state === "ready") setPreview("/m/" + key + ".webm") })
+  loadRecent()
+}
+function showJob(s) {
+  const what = { converting: "Converting", downloading: "Downloading", queued: "Starting" }[s.state] || s.state
+  if (s.state === "error") return setStatus("Error: " + s.error, true)
+  setStatus(what + (s.title ? " “" + s.title + "”" : "") + " " + s.progress + "%")
+}
+let pollTimer = null
+function pollDownload(key) {
+  clearTimeout(pollTimer)
+  getJSON("/status?id=" + key).then(s => {
+    if (s.state === "ready") return startPlayback(key, s.title || key, "/v/" + key + ".webm", null)
+    showJob(s)
+    if (s.state !== "error") pollTimer = setTimeout(() => pollDownload(key), 700)
+  }).catch(() => setStatus("Lost the helper.", true))
+}
+function download(src) {
+  setStatus("Downloading…")
+  getJSON("/fetch?src=" + encodeURIComponent(src)).then(r => r.error ? setStatus(r.error, true) : pollDownload(r.key))
+}
+function go(save) {
+  const src = $("src").value.trim()
+  if (!src) return setStatus("Paste a link first.", true)
+  ensureAudio()
+  if (save) return download(src)
+  setStatus("Loading stream…")
+  getJSON("/stream?src=" + encodeURIComponent(src)).then(r => {
+    if (r.fallback) return download(src)
+    startPlayback(r.key, r.title, r.audio, null)
+  }).catch(() => setStatus("Helper not reachable.", true))
+}
+$("play").onclick = () => go(false)
+$("save").onclick = () => go(true)
+$("src").addEventListener("keydown", e => { if (e.key === "Enter") go(false) })
+
+let recent = []
+function loadRecent() {
+  getJSON("/list").then(l => {
+    recent = l
+    $("recent").innerHTML = '<option value="">Recent…</option>' +
+      l.map((r, i) => `<option value="${i}">${(r.stream ? "" : "⬇ ") + esc(r.title || r.src)}</option>`).join("")
+  }).catch(() => {})
+}
+$("recent").onchange = () => {
+  const r = recent[+$("recent").value]; $("recent").value = ""
+  if (!r) return
+  $("src").value = r.src
+  if (r.stream) go(false)
+  else { ensureAudio(); startPlayback(r.key, r.title, "/v/" + r.key + ".webm", null) }
+}
+loadRecent()
+const mb = b => b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : Math.round(b / 1e6) + " MB"
+function loadFiles() {
+  getJSON("/files").then(f => {
+    $("files").textContent = "Files · " + mb(f.saved)
+    $("files").title = "Saved videos: " + mb(f.saved) + " (" + f.path + ")\nCar-screen copies: " + mb(f.screens) +
+      " (kept to the last 8 automatically)\nClick to open the folder and delete what you don't want."
+  }).catch(() => {})
+}
+$("files").onclick = () => { fetch("/openfolder"); setStatus("Opened the saved-videos folder. Deleted videos disappear from Recent.") }
+loadFiles()
+setInterval(() => { loadFiles(); loadRecent() }, 10000)
+
+// ---------------- Android Auto ----------------
+let aaWant = false, aaState = "off", aaDrawing = false
+const aaView = $("aaView"), aaCtx = aaView.getContext("2d")
+function drawAA(blob) {
+  if (aaState !== "on" || aaDrawing || (!opts.preview && !scrWs)) return   // (still drawn while the screen is shared)
+  aaDrawing = true
+  createImageBitmap(blob).then(b => { aaCtx.drawImage(b, 0, 0, aaView.width, aaView.height); b.close(); aaDrawing = false })
+    .catch(() => { aaDrawing = false })
+}
+const AA_TEXT = { off: "", starting: "Connecting to the phone… (USB: plug it in)", on: "Android Auto is on the car screen", nophone: "", lost: "", error: "" }
+function onAA(m) {
+  aaWant = m.on; aaState = m.state
+  $("tAA").classList.toggle("on", aaWant)
+  $("stage").classList.toggle("aa", aaWant && aaState === "on")
+  $("aaStatus").textContent = m.error || AA_TEXT[m.state] || ""
+  $("aaStatus").style.color = m.error ? "var(--bad)" : ""
+}
+$("tAA").onclick = () => {
+  ensureAudio()
+  aaWant = !aaWant
+  send({ type: "aa", on: aaWant }); send({ type: "frames", on: aaWant })
+  if (aaWant) { screensOn = true; renderToggles() }
+}
+;["brightness", "contrast", "saturation", "gamma", "tint"].forEach(k =>
+  $("lk_" + k).addEventListener("change", e => send({ type: "look", [k]: +e.target.value })))
+$("lookReset").onclick = () => send({ type: "look", reset: true })
+let gameMapOn = false
+$("tMap").onclick = () => { send({ type: "gamemap", on: !gameMapOn }) }
+$("calib").onclick = () => {
+  if (!gameConnected()) return setStatus("Start BeamNG and get in a car first.", true)
+  send({ type: "calibrate" })
+  setStatus("In the game: click the screen's 4 corners (top-left, top-right, bottom-right, bottom-left), move the camera a little (W/S moves the seat), then click the 4 corners again.")
+}
+aaView.addEventListener("click", e => {
+  const r = aaView.getBoundingClientRect()
+  const scale = Math.min(r.width / 1280, r.height / 720), w = 1280 * scale, h = 720 * scale
+  const u = (e.clientX - r.left - (r.width - w) / 2) / w, v = (e.clientY - r.top - (r.height - h) / 2) / h
+  if (u >= 0 && u <= 1 && v >= 0 && v <= 1) send({ type: "tap", u, v })
+})
+
+// ---------------- BeamMP shared music ----------------
+// Sending: the dry mix → MediaRecorder (WebM/Opus, 250 ms pieces) → relay /pub?player=<name>.
+// Receiving: relay /sub → per player a MediaSource-fed <audio> → its own car chain (distance, pan, Doppler).
+// Staying in sync: everything is live; a player whose buffer runs > 3 s ahead (after a freeze) jumps to the
+// live point; a new stream generation from the relay rebuilds that player; errors ask the relay to resync.
+let mpCfg = { relay: "", share: true }, mpMe = null
+let mpSend = null, mpRec = null, mpSendRetry = 0, mpSub = null, mpSubRetry = 0
+const remote = {}            // player name -> {audio, ms, sb, queue, chain, rate, gen}
+getJSON("/config").then(c => { mpCfg.relay = (c.mp_relay || "").replace(/\/$/, ""); mpCfg.share = c.mp_share !== false
+  mpCfg.shareScreen = c.mp_share_screen !== false; renderShare() })
+
+function renderShare() { $("tShare").classList.toggle("on", mpCfg.share); $("tShareScr").classList.toggle("on", !!mpCfg.shareScreen) }
+$("tShareScr").onclick = () => {
+  mpCfg.shareScreen = !mpCfg.shareScreen; renderShare()
+  fetch("/config", { method: "POST", body: JSON.stringify({ mp_share_screen: mpCfg.shareScreen }) })
+  if (!mpCfg.shareScreen) stopScreen()
+}
+$("tShare").onclick = () => {
+  mpCfg.share = !mpCfg.share; renderShare()
+  fetch("/config", { method: "POST", body: JSON.stringify({ mp_share: mpCfg.share }) })
+  if (!mpCfg.share) stopSending()
+}
+
+let windowActive = true
+function mpTick() {
+  if (!windowActive) { $("mpStatus").textContent = "BeamDeck is open in another window."; return }
+  const mp = gameConnected() && gameInfo.mp, me = mp && mp.me
+  const on = !!(me && mpCfg.relay)
+  if (on && mpCfg.share && nodes && ctx.state === "running" && (!mpSend || mpMe !== me) && performance.now() > mpSendRetry) startSending(me)
+  if (!(on && mpCfg.share)) stopSending()
+  if (on && mpCfg.shareScreen && (!scrWs || mpMe !== me) && performance.now() > scrRetry) startScreen(me)
+  if (!(on && mpCfg.shareScreen)) stopScreen()
+  else screenTick()
+  if (on && !mpSub && performance.now() > mpSubRetry) startReceiving()
+  if (!on) stopReceiving()
+  const vOn = on && opts.voice && !opts.micMuted
+  if (vOn && !vcStream && !vcStarting && performance.now() > vcRetry) micStart()
+  if (!vOn) micStop()
+  if (vOn && (!vcWs || mpMe !== me) && performance.now() > vcWsRetry) startVoiceWs(me)
+  if (!vOn) stopVoiceWs()
+  mpMe = me || null
+  applyRemote(mp ? mp.cars || [] : [])
+  applyVoices(mp ? mp.voice || [] : [])
+  const hearing = Object.keys(remote)
+  if (performance.now() - mpDbgAt > 2000) {
+    mpDbgAt = performance.now()
+    const rs = {}
+    for (const n in remote) { const r = remote[n], a = r.audio, b = a.buffered
+      rs[n] = { t: +a.currentTime.toFixed(1), end: b.length ? +b.end(b.length - 1).toFixed(1) : null, paused: a.paused,
+                bytes: r.bytes || 0, gen: r.gen, gain: +r.chain.gain.gain.value.toFixed(2), rate: +r.rate.toFixed(2) } }
+    send({ type: "mpdebug", me: me || null, relay: mpCfg.relay, sending: !!(mpSend && mpSend.readyState === 1),
+           sub: mpSub ? mpSub.readyState : null, screen: !!(scrWs && scrWs.readyState === 1), ctx: ctx && ctx.state,
+           cars: mp ? mp.cars || [] : null, remote: rs })
+  }
+  renderVoiceStatus(!!mp)
+  $("mpStatus").textContent = !mp ? "Not on a BeamMP server." : !mpCfg.relay ? "Set the music relay in Settings to share music." :
+    (mpCfg.share ? "Sharing as " + me : "Not sharing") + " · " + (hearing.length ? "hearing " + hearing.join(", ") : "no one else is sharing")
+}
+
+let mpRestartAt = 0
+function startSending(me) {
+  stopSending()
+  let ws
+  try { ws = new WebSocket(mpCfg.relay + "/pub?player=" + encodeURIComponent(me)) } catch (e) { mpSendRetry = performance.now() + 5000; return }
+  mpSend = ws
+  ws.onopen = () => {
+    try {
+      mpRec = new MediaRecorder(nodes.mpDest.stream, { mimeType: "audio/webm;codecs=opus", audioBitsPerSecond: 96000 })
+      mpRec.ondataavailable = e => { if (ws.readyState === 1 && e.data.size) ws.send(e.data) }
+      mpRec.start(250)
+    } catch (e) { ws.close() }
+  }
+  ws.onmessage = e => {                      // a listener couldn't join this stream: start a fresh one (at most every 15 s)
+    try { if (JSON.parse(e.data).type !== "restart") return } catch (x) { return }
+    if (mpSend === ws && performance.now() - mpRestartAt > 15000) { mpRestartAt = performance.now(); startSending(mpMe) }
+  }
+  ws.onclose = () => { if (mpSend === ws) { mpSend = null; mpSendRetry = performance.now() + 3000 } if (mpRec && mpRec.state !== "inactive") mpRec.stop(); mpRec = null }
+}
+function stopSending() {
+  if (mpRec && mpRec.state !== "inactive") mpRec.stop()
+  mpRec = null
+  if (mpSend) { const w = mpSend; mpSend = null; w.close() }
+}
+
+function startReceiving() {
+  let sub
+  try { sub = new WebSocket(mpCfg.relay + "/sub") } catch (e) { mpSubRetry = performance.now() + 5000; return }
+  sub.binaryType = "arraybuffer"
+  mpSub = sub
+  sub.onmessage = e => {
+    if (typeof e.data === "string") {
+      const m = JSON.parse(e.data)
+      if (m.player === mpMe) return
+      if (m.type === "start") newRemote(m.player, m.gen)
+      else if (m.type === "gone") dropRemote(m.player)
+      return
+    }
+    const b = new Uint8Array(e.data), kind = b[0], n = b[1], name = new TextDecoder().decode(b.subarray(2, 2 + n))
+    if (name === mpMe) return
+    if (kind === 86) return voiceIn(name, b.subarray(2 + n))      // 'V': their voice (an Opus packet)
+    if (kind === 83) {                         // 'S': their car screen → the local game, on their car (through the helper)
+      const out = new Uint8Array(b.length); out[0] = 82; out.set(b.subarray(1), 1)    // 'R' + [len][name][type][data]
+      if (ws && ws.readyState === 1) ws.send(out)      // (ws = the helper connection)
+      return
+    }
+    const r = remote[name]
+    if (!r) return resync(name)                // data for a stream whose start wasn't received
+    r.bytes = (r.bytes || 0) + b.length - 2 - n
+    r.queue.push(b.slice(2 + n)); pump(r)
+  }
+  sub.onclose = () => { if (mpSub === sub) { mpSub = null; mpSubRetry = performance.now() + 3000 } Object.keys(remote).forEach(dropRemote) }
+}
+function stopReceiving() {
+  if (mpSub) { const w = mpSub; mpSub = null; w.close() }
+  Object.keys(remote).forEach(dropRemote)
+}
+
+function newRemote(name, gen) {
+  dropRemote(name)
+  ensureAudio()
+  const audio = new Audio(), ms = new MediaSource()
+  audio.preservesPitch = false                // Doppler changes the pitch, like a real passing car
+  audio.src = URL.createObjectURL(ms)
+  const srcNode = ctx.createMediaElementSource(audio)
+  const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 40
+  const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 900
+  const pan = ctx.createStereoPanner(), gain = ctx.createGain(); gain.gain.value = 0
+  srcNode.connect(hp); hp.connect(lp); lp.connect(pan); pan.connect(gain); gain.connect(ctx.destination)
+  const r = remote[name] = { name, audio, ms, sb: null, queue: [], chain: { lp, pan, gain }, rate: 1, gen,
+                             bornAt: performance.now() }      // (silent at first: see applyRemote)
+  ms.addEventListener("sourceopen", () => {
+    try {
+      r.sb = ms.addSourceBuffer('audio/webm; codecs="opus"')
+      r.sb.mode = "sequence"
+      r.sb.addEventListener("updateend", () => pump(r))
+      r.sb.addEventListener("error", () => resync(name))
+      pump(r)
+    } catch (e) { resync(name) }
+  })
+  audio.play().catch(() => {})
+}
+function dropRemote(name) {
+  const r = remote[name]
+  if (!r) return
+  delete remote[name]
+  try { r.audio.pause(); URL.revokeObjectURL(r.audio.src); r.audio.removeAttribute("src"); r.audio.load() } catch (e) {}
+  try { r.chain.gain.disconnect() } catch (e) {}
+}
+let resyncAt = {}, resyncs = {}
+function resync(name) {
+  const now = performance.now()
+  if (now - (resyncAt[name] || 0) < 2000) return
+  resyncAt[name] = now
+  dropRemote(name)
+  // a few resyncs close together didn't fix it: ask that player's BeamDeck for a fresh stream instead
+  const recent = (resyncs[name] || []).filter(t => now - t < 30000); recent.push(now); resyncs[name] = recent
+  const type = recent.length >= 3 ? "restart" : "resync"
+  if (type === "restart") resyncs[name] = []
+  if (mpSub && mpSub.readyState === 1) mpSub.send(JSON.stringify({ type, player: name }))
+}
+function pump(r) {
+  if (!r.sb || r.sb.updating || remote[r.name] !== r) return
+  const a = r.audio, buf = a.buffered
+  if (buf.length) {
+    const end = buf.end(buf.length - 1)
+    if (end - a.currentTime > 3) a.currentTime = end - 0.8          // behind (a freeze): back to the live point
+    if (a.currentTime > 40) { try { r.sb.remove(0, a.currentTime - 20); return } catch (e) {} }   // keep memory small
+    if (a.paused) a.play().catch(() => {})
+  }
+  if (!r.queue.length) return
+  try { r.sb.appendBuffer(r.queue.shift()) } catch (e) { resync(r.name) }
+}
+
+// ---- the local car screen for the other players: Android Auto or video frames (480x270 JPEG, ~6/s), or now playing + cover
+let scrWs = null, scrRetry = 0, mapPane = "", scrLastFrame = 0, scrLastInfo = 0, scrCover = null, scrBusy = false
+const scrCanvas = document.createElement("canvas"); scrCanvas.width = 480; scrCanvas.height = 270
+const scrCtx = scrCanvas.getContext("2d")
+function startScreen(me) {
+  stopScreen()
+  let w
+  try { w = new WebSocket(mpCfg.relay + "/pub?player=" + encodeURIComponent(me) + "&kind=screen") } catch (e) { scrRetry = performance.now() + 5000; return }
+  w.binaryType = "arraybuffer"
+  scrWs = w; scrCover = null
+  w.onclose = () => { if (scrWs === w) { scrWs = null; scrRetry = performance.now() + 3000 } }
+}
+function stopScreen() { if (scrWs) { const w = scrWs; scrWs = null; try { w.close() } catch (e) {} } }
+function scrSend(type, bytes) {
+  if (!scrWs || scrWs.readyState !== 1) return
+  const out = new Uint8Array(1 + bytes.length); out[0] = type.charCodeAt(0); out.set(bytes, 1); scrWs.send(out)
+}
+function scrMode() {
+  if (!screensOn) return "none"
+  if (aaWant && aaState === "on") return "aa"
+  if (current && current.kind === "video" && preview.getAttribute("src") && preview.readyState >= 2) return "video"
+  if (lastNow && lastNow.title && (current || appKey)) return "np"
+  return "none"
+}
+function scrFrame(source) {                     // draws a frame and sends it as a small JPEG
+  if (scrBusy) return
+  scrBusy = true
+  scrCtx.drawImage(source, 0, 0, 480, 270)
+  scrCanvas.toBlob(b => { if (b) b.arrayBuffer().then(a => scrSend("F", new Uint8Array(a))); scrBusy = false }, "image/jpeg", 0.6)
+}
+function screenTick() {                          // runs with every game update (~20/s, not throttled)
+  if (!scrWs || scrWs.readyState !== 1) return
+  const now = performance.now(), mode = scrMode()
+  if (mode === "video" && now - scrLastFrame > 160) { scrLastFrame = now; scrFrame(preview) }
+  if (mode === "aa" && now - scrLastFrame > 160) { scrLastFrame = now; scrFrame(aaView) }
+  if (now - scrLastInfo > 1000) {                // mode, now playing and the map pane, once a second
+    scrLastInfo = now
+    const np = mode === "np" ? { t: lastNow.title || "", a: lastNow.artist || "", al: lastNow.album || "",
+      d: current && current.kind === "track" ? (master.duration || 0) : +$("seek").max || 0,
+      p: current && current.kind === "track" ? master.currentTime : +$("seek").value || 0,
+      z: current && current.kind === "track" ? master.paused : $("pp").textContent === "▶" } : null
+    scrSend("N", new TextEncoder().encode(JSON.stringify({ mode, np, pane: mode === "aa" ? mapPane : "" })))
+    if (mode === "np" && lastNow.cover !== scrCover) {     // the cover when it changes (256 px JPEG)
+      scrCover = lastNow.cover
+      if (!lastNow.cover) scrSend("C", new Uint8Array(0))
+      else {
+        const img = new Image()
+        img.onload = () => { const c = document.createElement("canvas"); c.width = c.height = 256
+          c.getContext("2d").drawImage(img, 0, 0, 256, 256)
+          c.toBlob(b => b && b.arrayBuffer().then(a => scrSend("C", new Uint8Array(a))), "image/jpeg", 0.8) }
+        img.src = lastNow.cover
+      }
+    }
+  }
+}
+
+let mpDbgAt = 0
+function applyRemote(cars) {
+  if (!ctx) return
+  const t = ctx.currentTime, k = 0.1, vol = +$("vol").value, now = performance.now()
+  for (const name in remote) {
+    const r = remote[name], c = cars.find(x => x.name === name)
+    // stuck (e.g. after a freeze / vehicle sync): data keeps coming but playback doesn't move -> rebuild it
+    if (r.audio.currentTime !== r.lastT) { r.lastT = r.audio.currentTime; r.movedAt = now }
+    else if (now - (r.movedAt || (r.movedAt = now)) > 4000 && (r.bytes || 0) > 20000) { resync(name); continue }
+    if (!c) { r.chain.gain.gain.setTargetAtTime(0, t, k); continue }   // not in a car right now
+    // muffled through their car; an open door or broken window on the listener's side lets it out (as for the local car)
+    const d = Math.max(0, c.dist - 1.5), o = Math.min(1, (c.open || 0) * 3)
+    const mCut = Math.max(250, 900 / (1 + d / 12)), mGain = 0.55 * Math.pow(1 / (1 + d / 6), 1.3)
+    const cCut = Math.max(3000, 11000 / (1 + d / 40)), cGain = 1 / (1 + d / 15)
+    const cutoff = c.dist < 1.5 ? 11000 : mCut * Math.pow(cCut / mCut, o)
+    const g = c.dist < 1.5 ? 1 : mGain + (cGain - mGain) * o
+    r.chain.lp.frequency.setTargetAtTime(cutoff, t, k)
+    // a rebuilt stream starts with a scrap of the stream's very first audio: stay silent for it, then fade in
+    const age = now - r.bornAt
+    r.chain.gain.gain.setTargetAtTime(age < 900 ? 0 : g * vol, t, age < 1500 ? 0.25 : k)
+    r.chain.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, (c.pan || 0) * 0.8)), t, k)
+    // Doppler: 343 m/s speed of sound; approaching (rv > 0) plays faster and higher. Kept to real car speeds
+    // (±40 m/s, about ±12 %), and never faster than the music arrives: a low buffer would make it stutter
+    const b = r.audio.buffered, ahead = b.length ? b.end(b.length - 1) - r.audio.currentTime : 0
+    let target = 343 / (343 - Math.max(-40, Math.min(40, c.rv || 0)))
+    if (ahead < 0.5) target = Math.min(target, 0.97)          // nearly dry: let the buffer refill
+    else if (ahead < 1) target = Math.min(target, 1)
+    r.rate += (target - r.rate) * 0.15
+    try { r.audio.playbackRate = r.rate } catch (e) {}
+  }
+}
+
+// ---------------- voice chat (BeamMP) ----------------
+// the microphone -> Opus packets of 20 ms (WebCodecs) -> relay -> the other players, who hear it from the speaker's
+// position in the game (their car or on foot): quieter with distance, panned, never muffled. A small jitter buffer
+// keeps the delay low.
+let vcStream = null, vcReader = null, vcEnc = null, vcEncCh = 1, vcStarting = false, vcRetry = 0, vcErr = ""
+let vcEncBad = 0, vcWs = null, vcWsRetry = 0, vcHoldUntil = 0, vcOn = false, vcLevel = 0, pttDown = false
+const voices = {}             // player name -> {dec, ch, ts, playAt, lastAt, chain}
+
+async function micStart() {
+  vcStarting = true
+  try {
+    if (!window.MediaStreamTrackProcessor || !window.AudioEncoder) throw new Error("this browser can't do voice chat (use Edge or Chrome)")
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+      deviceId: opts.mic ? { exact: opts.mic } : undefined, channelCount: 1, sampleRate: 48000,
+      echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+    if (vcStream) stream.getTracks().forEach(t => t.stop())
+    else {
+      vcStream = stream; vcErr = ""
+      const reader = vcReader = new MediaStreamTrackProcessor({ track: stream.getAudioTracks()[0] }).readable.getReader()
+      micLoop(reader)
+      fillMics()
+    }
+  } catch (e) {
+    vcErr = e.name === "NotAllowedError" ? "The microphone is blocked: allow it for BeamDeck (the icon at the top of this window)."
+          : e.name === "OverconstrainedError" ? "That microphone isn't there any more: pick one in Settings." : "Microphone: " + e.message
+    vcRetry = performance.now() + 10000
+  }
+  vcStarting = false
+}
+function micStop() {
+  if (vcReader) { try { vcReader.cancel() } catch (e) {} vcReader = null }
+  if (vcStream) { vcStream.getTracks().forEach(t => t.stop()); vcStream = null }
+  if (vcEnc) { try { vcEnc.close() } catch (e) {} vcEnc = null }
+  vcOn = false; vcLevel = 0
+}
+function micLevel(ad) {
+  const n = ad.numberOfFrames, f = new Float32Array(n)
+  try { ad.copyTo(f, { planeIndex: 0, format: "f32-planar" }) } catch (e) { return 0 }
+  let sum = 0
+  for (let i = 0; i < n; i++) sum += f[i] * f[i]
+  return Math.sqrt(sum / n)
+}
+function micEncoder(ad) {
+  vcEncCh = Math.min(2, ad.numberOfChannels)
+  const enc = new AudioEncoder({
+    output: chunk => {
+      if (!vcWs || vcWs.readyState !== 1) return
+      const out = new Uint8Array(1 + chunk.byteLength); out[0] = vcEncCh; chunk.copyTo(out.subarray(1)); vcWs.send(out)
+    },
+    error: e => { vcErr = "Voice encoder: " + e.message; vcEnc = null; vcEncBad = performance.now() + 10000 } })
+  enc.configure({ codec: "opus", sampleRate: ad.sampleRate, numberOfChannels: vcEncCh, bitrate: 32000,
+                  opus: { frameDuration: 20000 } })
+  return enc
+}
+async function micLoop(reader) {
+  while (reader === vcReader) {
+    let r
+    try { r = await reader.read() } catch (e) { break }
+    if (r.done) break
+    const ad = r.value
+    try {
+      const lvl = micLevel(ad), now = performance.now()
+      vcLevel = Math.max(lvl, vcLevel * 0.85)
+      if (opts.voiceMode === "ptt" ? pttDown : lvl > opts.vaLevel) vcHoldUntil = now + (opts.voiceMode === "ptt" ? 150 : 450)
+      vcOn = !opts.micMuted && now < vcHoldUntil && !!vcWs && vcWs.readyState === 1
+      if (vcOn) {
+        if ((!vcEnc || vcEnc.state === "closed") && now > vcEncBad) vcEnc = micEncoder(ad)
+        if (vcEnc && vcEnc.state === "configured") vcEnc.encode(ad)
+      }
+    } catch (e) { vcErr = "Voice: " + e.message } finally { ad.close() }
+  }
+}
+function startVoiceWs(me) {
+  stopVoiceWs()
+  let w
+  try { w = new WebSocket(mpCfg.relay + "/pub?player=" + encodeURIComponent(me) + "&kind=voice") } catch (e) { vcWsRetry = performance.now() + 5000; return }
+  vcWs = w
+  w.onclose = () => { if (vcWs === w) { vcWs = null; vcWsRetry = performance.now() + 3000 } }
+}
+function stopVoiceWs() { if (vcWs) { const w = vcWs; vcWs = null; try { w.close() } catch (e) {} } }
+
+function voiceIn(name, data) {
+  if (!ctx || !opts.voice || data.length < 2 || !window.AudioDecoder) return
+  let v = voices[name]
+  const ch = data[0]
+  if (!v || v.ch !== ch || v.dec.state === "closed") { voiceDrop(name); v = voices[name] = newVoice(name, ch) }
+  v.lastAt = performance.now()
+  try { v.dec.decode(new EncodedAudioChunk({ type: "key", timestamp: v.ts, data: data.subarray(1) })); v.ts += 20000 }
+  catch (e) { voiceDrop(name) }
+}
+function newVoice(name, ch) {
+  const pan = ctx.createStereoPanner(), gain = ctx.createGain(); gain.gain.value = 0
+  pan.connect(gain); gain.connect(ctx.destination)
+  const v = { name, ch, ts: 0, playAt: 0, lastAt: 0, chain: { pan, gain } }
+  v.dec = new AudioDecoder({ output: ad => voicePlay(v, ad), error: () => voiceDrop(name) })
+  v.dec.configure({ codec: "opus", sampleRate: 48000, numberOfChannels: ch })
+  return v
+}
+function voicePlay(v, ad) {
+  try {
+    if (voices[v.name] !== v) return
+    const n = ad.numberOfFrames, nc = ad.numberOfChannels, ab = ctx.createBuffer(nc, n, ad.sampleRate)
+    for (let c = 0; c < nc; c++) { const f = new Float32Array(n); ad.copyTo(f, { planeIndex: c, format: "f32-planar" }); ab.copyToChannel(f, c) }
+    const now = ctx.currentTime
+    // (re)start a little ahead (absorbs network jitter); if delay builds up, drop back to that
+    if (v.playAt < now + 0.01 || v.playAt > now + 0.4) v.playAt = now + 0.08
+    const src = ctx.createBufferSource(); src.buffer = ab; src.connect(v.chain.pan); src.start(v.playAt)
+    v.playAt += ab.duration
+  } catch (e) {} finally { ad.close() }
+}
+function voiceDrop(name) {
+  const v = voices[name]
+  if (!v) return
+  delete voices[name]
+  try { v.dec.close() } catch (e) {}
+  try { v.chain.gain.disconnect() } catch (e) {}
+}
+function applyVoices(list) {
+  if (!ctx) return
+  const t = ctx.currentTime, now = performance.now()
+  for (const name in voices) {
+    const v = voices[name], c = list.find(x => x.name === name)
+    if (now - v.lastAt > 10000) { voiceDrop(name); continue }
+    if (!c) { v.chain.gain.gain.setTargetAtTime(0, t, 0.1); continue }      // not in the game nearby
+    const d = Math.max(0, c.dist - 2)
+    let g = 1 / (1 + d / 10)                                                 // full up close, half at 12 m
+    if (c.dist > 60) g *= Math.max(0, 1 - (c.dist - 60) / 30)               // and gone by 90 m
+    v.chain.gain.gain.setTargetAtTime(g * opts.voiceVol, t, 0.05)
+    v.chain.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, (c.pan || 0) * 0.8)), t, 0.05)
+  }
+}
+function renderVoiceStatus(inMp) {
+  $("tVoice").classList.toggle("on", opts.voice)
+  $("tMute").classList.toggle("on", opts.micMuted)
+  $("voiceVol").value = opts.voiceVol; $("voiceVolTxt").textContent = Math.round(opts.voiceVol * 100) + "%"
+  const talking = Object.values(voices).filter(v => performance.now() - v.lastAt < 300).map(v => v.name)
+  $("vcStatus").textContent = !opts.voice ? "Voice chat is off." : !inMp ? "" :
+    (vcErr ? vcErr : opts.micMuted ? "Mic muted." : !vcStream ? "Starting the microphone…" :
+     vcOn ? "🎙 You're talking." : opts.voiceMode === "ptt" ? "Mic ready (hold push to talk)." : "Mic ready.") +
+    (talking.length ? " · 🔊 " + talking.join(", ") : "") + (!ctx ? " · Click this window once to hear voices." : "")
+}
+function toast(text) { send({ type: "toast", text }) }
+function gameCmd(m) {
+  if (!windowActive) return
+  if (m.cmd === "ptt") { pttDown = m.on; return }
+  // media keys: BeamDeck's own player while it plays (or has something paused and Android Auto is off);
+  // otherwise Android Auto's music on the phone, through the head unit (like steering-wheel buttons)
+  if ((m.cmd === "playpause" || m.cmd === "next" || m.cmd === "prev") && aaWant && aaState === "on" &&
+      (!current || master.paused)) {
+    send({ type: "aakey", key: m.cmd })
+    return toast({ playpause: "BeamDeck: Android Auto play / pause", next: "BeamDeck: Android Auto next", prev: "BeamDeck: Android Auto previous" }[m.cmd])
+  }
+  if (m.cmd === "playpause") {
+    if (!current) return toast("BeamDeck: nothing playing")
+    const wasPaused = master.paused
+    $("pp").click(); return toast(wasPaused ? "BeamDeck: ▶ " + (current.title || "playing") : "BeamDeck: paused")
+  }
+  if (m.cmd === "next" || m.cmd === "prev") {
+    if (!current) return toast("BeamDeck: nothing playing")
+    $(m.cmd).click(); return setTimeout(() => current && toast("BeamDeck: ▶ " + (current.title || "")), 400)
+  }
+  if (m.cmd === "mute") { opts.micMuted = !opts.micMuted; saveOpts(); renderVoiceStatus(true); toast(opts.micMuted ? "BeamDeck: mic muted" : "BeamDeck: mic on") }
+  else if (m.cmd === "vol_up" || m.cmd === "vol_down") {
+    opts.vol = Math.round(Math.max(0, Math.min(1.5, opts.vol + (m.cmd === "vol_up" ? 0.1 : -0.1))) * 100) / 100
+    $("vol").value = opts.vol; saveOpts(); applyAudio(); toast("BeamDeck music volume: " + Math.round(opts.vol * 100) + "%")
+  }
+  else if (m.cmd === "voice_up" || m.cmd === "voice_down") {
+    opts.voiceVol = Math.round(Math.max(0, Math.min(2, opts.voiceVol + (m.cmd === "voice_up" ? 0.1 : -0.1))) * 100) / 100
+    saveOpts(); renderVoiceStatus(true); toast("BeamDeck voice volume: " + Math.round(opts.voiceVol * 100) + "%")
+  }
+}
+$("tVoice").onclick = () => { opts.voice = !opts.voice; saveOpts(); renderVoiceStatus(gameConnected() && !!gameInfo.mp) }
+$("tMute").onclick = () => { opts.micMuted = !opts.micMuted; saveOpts(); renderVoiceStatus(gameConnected() && !!gameInfo.mp) }
+$("voiceVol").addEventListener("input", () => { opts.voiceVol = +$("voiceVol").value; saveOpts(); renderVoiceStatus(gameConnected() && !!gameInfo.mp) })
+$("cfVcMode").value = opts.voiceMode
+$("cfVcMode").onchange = () => { opts.voiceMode = $("cfVcMode").value; saveOpts() }
+$("cfVa").value = opts.vaLevel
+$("cfVa").addEventListener("input", () => { opts.vaLevel = +$("cfVa").value; saveOpts() })
+$("cfMic").onchange = () => { opts.mic = $("cfMic").value; saveOpts(); micStop(); vcRetry = 0 }
+function fillMics() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return
+  navigator.mediaDevices.enumerateDevices().then(ds => {
+    const sel = $("cfMic"), mics = ds.filter(d => d.kind === "audioinput" && d.deviceId !== "default" && d.deviceId !== "communications")
+    sel.innerHTML = '<option value="">Default microphone</option>' +
+      mics.map(d => '<option value="' + esc(d.deviceId) + '">' + esc(d.label || "Microphone") + "</option>").join("")
+    sel.value = mics.some(d => d.deviceId === opts.mic) ? opts.mic : ""
+  }).catch(() => {})
+}
+fillMics()
+setInterval(() => {
+  // mic level meter (Settings): the bar is the input level, | is where voice activation starts sending
+  const w = 20, at = l => Math.min(w, Math.round(Math.sqrt(l / 0.08) * w))
+  const bar = Array.from({ length: w }, (_, i) => i === at(opts.vaLevel) ? "|" : i < at(vcLevel) ? "▮" : "·").join("")
+  $("vcMeter").textContent = vcStream ? bar : "(mic off)"
+  if (!gameConnected()) mpTick()               // the game went away: stop sending (mpTick normally runs per game update)
+}, 250)
+
+// ---------------- car toggles ----------------
+function renderToggles() {
+  $("tScreens").classList.toggle("on", screensOn)
+  $("tAudio").classList.toggle("on", opts.audio)
+  $("tPause").classList.toggle("on", opts.pauseWithGame)
+  $("tPreview").classList.toggle("on", opts.preview)
+  $("stage").classList.toggle("hidden", !opts.preview)
+}
+$("tScreens").onclick = () => {
+  screensOn = !screensOn; send({ type: "screens", on: screensOn }); renderToggles()
+  if (screensOn && !gameConnected()) setStatus("Car screens will turn on once the game is connected.")
+}
+$("tAudio").onclick = () => { opts.audio = !opts.audio; saveOpts(); renderToggles(); applyAudio() }
+$("tPause").onclick = () => { opts.pauseWithGame = !opts.pauseWithGame; saveOpts(); renderToggles() }
+$("tPreview").onclick = () => { opts.preview = !opts.preview; saveOpts(); renderToggles(); if (!opts.preview) preview.pause(); else followPreview() }
+renderToggles()
+
+// ---------------- settings ----------------
+function loadSettings() {
+  getJSON("/config").then(c => {
+    $("cfFolders").value = (c.music_folders || []).join("\n")
+    $("cfNdUrl").value = c.navidrome.url || ""; $("cfNdUser").value = c.navidrome.user || ""
+    $("cfNdPass").value = ""; $("cfNdPass").placeholder = c.navidrome.has_password ? "unchanged" : "not set"
+    $("cfUser").value = c.beamng_userfolder || ""; $("cfUser").placeholder = c.detected_userfolder || "not found"
+    $("cfBrowser").value = c.browser || ""
+    $("cfAaT").value = c.aa_transport || "usb"
+    $("cfRelay").value = c.mp_relay || ""
+  })
+  libStatus()
+}
+function libStatus() {
+  getJSON("/lib/status").then(s => {
+    $("libStatus").textContent = s.scanning ? `Scanning… ${s.done} / ${s.total}` : `${s.count} songs`
+    if (s.scanning) setTimeout(libStatus, 1000)
+  })
+}
+function saveSettings() {
+  const body = {
+    music_folders: $("cfFolders").value.split("\n"),
+    navidrome: { url: $("cfNdUrl").value, user: $("cfNdUser").value, password: $("cfNdPass").value },
+    beamng_userfolder: $("cfUser").value, browser: $("cfBrowser").value, aa_transport: $("cfAaT").value,
+    mp_relay: $("cfRelay").value,
+  }
+  return fetch("/config", { method: "POST", body: JSON.stringify(body) }).then(r => r.json())
+}
+$("cfSave").onclick = () => saveSettings().then(c => { $("cfStatus").textContent = "Saved."; mpCfg.relay = c.mp_relay || ""; loadSettings() })
+$("relayTest").onclick = () => {
+  $("relayStatus").textContent = "Testing…"
+  saveSettings().then(c => {                   // the helper tidies the address (adds ws://, the port…)
+    mpCfg.relay = c.mp_relay || ""; $("cfRelay").value = mpCfg.relay
+    if (!mpCfg.relay) throw new Error("empty")
+    return fetch(mpCfg.relay.replace(/^ws/, "http") + "/players").then(r => r.json())
+  }).then(l => {
+    if (!Array.isArray(l)) throw new Error("not a relay")
+    const n = new Set(l.map(x => x.player)).size
+    $("relayStatus").textContent = "Connected · " + n + " player" + (n === 1 ? "" : "s") + " sharing now"; $("relayStatus").style.color = "var(--ok)"
+  }).catch(e => { $("relayStatus").textContent = e.message === "not a relay" ? "That isn't a BeamDeck relay." : "Can't reach it."
+    $("relayStatus").style.color = "var(--bad)" })
+}
+$("rescan").onclick = () => saveSettings().then(() => { send({ type: "rescan" }); setTimeout(libStatus, 300) })
+$("ndTest").onclick = () => {
+  $("ndStatus").textContent = "Testing…"
+  saveSettings().then(() => getJSON("/nd/ping")).then(r => {
+    $("ndStatus").textContent = r.ok ? "Connected." : (r.error || "Failed.")
+    $("ndStatus").style.color = r.ok ? "var(--ok)" : "var(--bad)"
+  }).catch(() => { $("ndStatus").textContent = "Failed."; $("ndStatus").style.color = "var(--bad)" })
+}
+</script>
+</body>
+</html>

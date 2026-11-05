@@ -1,0 +1,6 @@
+{
+  "format":2,
+  "mainPartName":"tv",
+  "model":"tv",
+  "parts":{"tv_type":"tv_25in_crt_beamdeck"}
+}

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=BeamDeck
+Comment=Videos, music and Android Auto in any BeamNG car
+Exec=@BIN@/beamdeck
+Icon=beamdeck
+Categories=AudioVideo;Game;
+StartupWMClass=BeamDeck

@@ -1,0 +1,15 @@
+# BeamDeck multiplayer relay: passes each player's car music to the others (see beamdeck-relay.py).
+# Bound to the Tailscale address only, like the BeamMP server is reached.
+services:
+  beamdeck-relay:
+    image: python:3.12-alpine
+    container_name: beamdeck-relay
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./beamdeck-relay.py:/app/beamdeck-relay.py:ro
+    command: ["python3", "-u", "beamdeck-relay.py"]
+    environment:
+      - BEAMDECK_RELAY_PORT=47140
+    ports:
+      - "${RELAY_BIND:-0.0.0.0}:47140:47140"

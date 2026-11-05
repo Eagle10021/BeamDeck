@@ -1,0 +1,12 @@
+{
+// BeamDeck: voice chat and volume, bindable in Options > Controls (they reach the BeamDeck window through its helper)
+"beamdeck_push_to_talk"   :{"cat":"general", "order": 90, "ctx": "tlua", "onDown": "if beamdeck then beamdeck.ptt(true) end", "onUp": "if beamdeck then beamdeck.ptt(false) end", "title": "BeamDeck: push to talk", "desc": "Hold to talk in BeamDeck voice chat (when voice chat is set to push to talk)" },
+"beamdeck_mute_mic"       :{"cat":"general", "order": 91, "ctx": "tlua", "onDown": "if beamdeck then beamdeck.command('mute') end", "title": "BeamDeck: mute / unmute mic", "desc": "Turns your BeamDeck voice chat microphone off or on" },
+"beamdeck_play_pause"     :{"cat":"general", "order": 89, "ctx": "tlua", "onDown": "if beamdeck then beamdeck.command('playpause') end", "title": "BeamDeck: play / pause", "desc": "Plays or pauses what BeamDeck is playing (video, song)" },
+"beamdeck_next_track"     :{"cat":"general", "order": 89, "ctx": "tlua", "onDown": "if beamdeck then beamdeck.command('next') end", "title": "BeamDeck: next song", "desc": "Skips to the next song in BeamDeck" },
+"beamdeck_prev_track"     :{"cat":"general", "order": 89, "ctx": "tlua", "onDown": "if beamdeck then beamdeck.command('prev') end", "title": "BeamDeck: previous song", "desc": "Back to the start of the song, or the previous one" },
+"beamdeck_music_vol_up"   :{"cat":"general", "order": 92, "ctx": "tlua", "onDown": "if beamdeck then beamdeck.command('vol_up') end", "title": "BeamDeck: music volume up", "desc": "Louder music, videos and Android Auto from BeamDeck" },
+"beamdeck_music_vol_down" :{"cat":"general", "order": 93, "ctx": "tlua", "onDown": "if beamdeck then beamdeck.command('vol_down') end", "title": "BeamDeck: music volume down", "desc": "Quieter music, videos and Android Auto from BeamDeck" },
+"beamdeck_voice_vol_up"   :{"cat":"general", "order": 94, "ctx": "tlua", "onDown": "if beamdeck then beamdeck.command('voice_up') end", "title": "BeamDeck: voice chat volume up", "desc": "Louder voices of other players" },
+"beamdeck_voice_vol_down" :{"cat":"general", "order": 95, "ctx": "tlua", "onDown": "if beamdeck then beamdeck.command('voice_down') end", "title": "BeamDeck: voice chat volume down", "desc": "Quieter voices of other players" }
+}

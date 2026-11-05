@@ -1,0 +1,6 @@
+# build output
+beamdeck.zip
+BeamDeck-Windows.zip
+dist/
+__pycache__/
+*.pyc

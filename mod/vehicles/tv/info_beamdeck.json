@@ -1,0 +1,6 @@
+{
+  "Configuration": "BeamDeck",
+  "Description": "Shows what BeamDeck plays on your car screen (video, Android Auto, now playing), with the sound coming from the TV when you're near it.",
+  "Value": 250,
+  "Weight": 45
+}
