@@ -48,10 +48,30 @@ BeamDeck has three parts: a small **helper** program, a **control window** (an a
 
 ### Car Audio
 
-* **Inside the car:** clear, like the door speakers. **Outside:** muffled through the body and quieter with distance.
-* **Open doors and broken windows** let the sound out: an opening on the listener's side brings it up to the interior sound (a broken window counts about 84% of an open door), openings on the far side less.
-* **Bass shake:** heavy bass shakes the doors, lids and, on big hits, the body. Adjustable, and gated so only real bass moves anything.
-* Music stays with the car: getting out and walking (or spectating in multiplayer) leaves it playing in the last car.
+Everything BeamDeck plays (videos, the music library, Navidrome, **App sound** and Android Auto's own music and navigation voice) goes through the same car-speaker effect, worked out about 20 times a second from where the camera is and what the car looks like.
+
+| Where the camera is | How it sounds |
+| :--- | :--- |
+| **Inside the car** (any interior camera) | Clear, like the door speakers: full range with a little extra low end, slightly panned to the car's centre |
+| **Outside, car closed** | Muffled through the body (high frequencies cut, more so further away), with a boomy low end, quieter with distance and panned to where the car is |
+| **Outside, door open or window broken** | Opens up towards the interior sound: an opening on the listener's side counts fully, the far side less; a broken window counts about 84% of an open door, and several openings add up |
+| **Walking away** | The music stays in the car that was left (walking mode and, in multiplayer, spectating never move it), like a parked car with the stereo on |
+| **Car audio off** | Plain stereo sound, the same everywhere, for third-person play or headphones without the effect |
+
+* **Smooth:** changes glide over a fraction of a second, so opening a door or walking around the car never clicks or jumps.
+* **Volume:** the slider in the window, or the **music volume** game controls (shown on screen); remembered between sessions.
+* **Pause with game:** optional, pauses BeamDeck's player while the game is paused.
+* **Any car:** doors, lids and windows are found from each car's own parts (door latches, glass break groups), so modded cars work too.
+
+#### Other Sound Sources
+
+* **BeamDeck TV:** when the camera is nearer a BeamDeck TV than the car (and not inside the car), the sound comes from the TV instead: clear, never muffled, quieter with distance and panned to it. It plays from one place at a time, never both.
+* **Other players' cars (BeamMP):** each car plays its owner's music through the same effect (muffled from outside, louder with their doors or windows open on the listener's side), plus **Doppler**: higher and faster as a car approaches, lower as it drives away (kept within real car speeds, about ±12%).
+* **Voice chat (BeamMP):** voices come from where each player is, in a car or on foot, and are never muffled by cars or doors: full volume within 2 m, half at about 12 m, silent past 90 m. Their own volume control and game controls.
+
+#### Bass Shake
+
+Heavy bass physically moves the car: the doors flex in and out and lids buzz (about 12 Hz), and on big hits the body bounces and rocks (about 3 Hz). It only reacts to real bass (a gate ignores quiet or mid-range music), follows the strength slider in the **Car** tab (0 turns it off), and works on any car with doors or a body to move.
 
 ### Android Auto
 
