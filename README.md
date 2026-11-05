@@ -144,35 +144,79 @@ Android phones only; Apple CarPlay isn't possible (see [Android Auto](#android-a
 
 ## Multiplayer Setup (BeamMP)
 
-**On the BeamMP server (once):**
+> [!IMPORTANT]
+> Multiplayer needs **your own server**: a BeamMP server you control (the BeamDeck mod goes into its `Resources/Client` folder, so public servers run by others won't have it), and a machine to run the **relay** that every player can reach. Both can be the same machine: a home server, a VPS, or a PC that stays on while you play. Single player needs neither.
 
-1. Build the game mod and put it in the server's client resources:
+### 1. Choose the Server Machine
 
-   ```sh
-   ./make-beammp-zip.sh                                          # builds beamdeck.zip
-   ./make-beammp-zip.sh myserver:beammp-server/Resources/Client/ # or build and copy it there with scp
+Any always-on Linux or Windows machine works; the BeamMP server and the relay are both light. The BeamMP server only syncs cars, and the relay passes on about 100 kbit/s per player sharing music, plus video frames while screens are shared and around 20 kbit/s while someone talks.
+
+### 2. Make It Reachable
+
+Every player needs to reach the machine on port **30814** (BeamMP, TCP and UDP) and **47140** (relay, TCP). Pick one:
+
+* **Same home network:** use the machine's LAN address (e.g. `192.168.1.20`). Nothing else to set up.
+* **[Tailscale](https://tailscale.com) (recommended for friends elsewhere):** install it on the server and on every player's PC, and share the server with them (or invite them to the tailnet). Use the server's Tailscale address (`100.x.y.z`). No router changes, and nothing is exposed to the internet.
+* **Port forwarding:** forward TCP and UDP 30814 and TCP 47140 on the router to the server, and use the public IP. The relay has no password, so anyone who finds the port can listen in; Tailscale or a LAN is safer.
+
+If the server has a firewall, allow those ports (e.g. `sudo ufw allow 30814` and `sudo ufw allow 47140/tcp`).
+
+### 3. Set Up the BeamMP Server
+
+1. Download **BeamMP-Server** for the server's system from its [releases page](https://github.com/BeamMP/BeamMP-Server/releases) into its own folder (e.g. `~/beammp-server`).
+2. Get an **AuthKey**: sign in at [keymaster.beammp.com](https://keymaster.beammp.com) and create a key for the server.
+3. Run the server once (`./BeamMP-Server` on Linux after `chmod +x BeamMP-Server`, or the `.exe` on Windows). It creates `ServerConfig.toml` and a `Resources` folder; stop it with Ctrl+C.
+4. Edit `ServerConfig.toml`, section `[General]`:
+
+   ```toml
+   AuthKey = "your-key-from-keymaster"
+   Name = "My BeamDeck server"
+   Map = "/levels/italy/info.json"      # any map, e.g. /levels/west_coast_usa/info.json
+   MaxPlayers = 8
+   Port = 30814
+   Private = true                       # hidden from the public server list; players use Direct Connect
    ```
 
-   Nothing goes in `Resources/Server`. Restart the BeamMP server after updating it; players download it when they join.
+5. Start it again and leave it running (for example in `tmux`/`screen` or as a systemd service on Linux).
+6. Players join from the BeamMP launcher with **Direct Connect**: the server's address and port 30814.
 
-2. Run the **relay**, which passes music, car screens and voice between players. It is a single Python script using only the standard library, in [`relay/`](relay):
+### 4. Add BeamDeck to the Server
 
-   ```sh
-   cd relay
-   RELAY_BIND=0.0.0.0 docker compose up -d       # or bind to one address, e.g. a Tailscale IP: RELAY_BIND=100.x.y.z
-   # without Docker:  BEAMDECK_RELAY_PORT=47140 python3 beamdeck-relay.py
-   ```
+Build the game mod and put it in the server's `Resources/Client` folder:
 
-   It listens on port **47140**. Every player must be able to reach it (same LAN, a VPN such as Tailscale, or a forwarded port).
+```sh
+./make-beammp-zip.sh                                          # builds beamdeck.zip
+./make-beammp-zip.sh myserver:beammp-server/Resources/Client/ # or build and copy it there with scp
+```
 
-**On each player's PC:**
+Nothing goes in `Resources/Server`. Restart the BeamMP server after adding or updating it; players download it when they join.
+
+### 5. Run the Relay
+
+The relay passes music, car screens and voice between players. It is a single Python script using only the standard library, in [`relay/`](relay). Copy the `relay` folder to the server, then either:
+
+```sh
+# with Docker (Linux: the docker package or get.docker.com; Windows: Docker Desktop)
+cd relay
+RELAY_BIND=0.0.0.0 docker compose up -d       # or one address only, e.g. the Tailscale IP: RELAY_BIND=100.x.y.z
+```
+
+```sh
+# without Docker (needs Python 3); keep it running like the BeamMP server
+cd relay
+python3 beamdeck-relay.py                    # listens on port 47140; BEAMDECK_RELAY_PORT changes it
+```
+
+Check it from a player's PC: opening `http://<server-address>:47140/players` in a browser should show `[]` (nobody sharing yet).
+
+### 6. On Each Player's PC
 
 1. Install BeamDeck (the server only hands out the game mod; the sound is played by the BeamDeck window).
-2. **Settings → Multiplayer → Music relay address:** `ws://<relay-address>:47140` (just `<relay-address>:47140` works too), **Save**, then **Test**: it should say "Connected".
+2. **Settings → Multiplayer → Music relay address:** `ws://<server-address>:47140` (just `<server-address>:47140` works too), **Save**, then **Test**: it should say "Connected".
 3. **Car** tab: **Share my music**, **Share my screen** and **Voice chat** are on by default. **Settings → Multiplayer** has push to talk, the microphone and the voice sensitivity. Allow the microphone when the window asks, and use headphones for voice chat.
 4. Click once anywhere in the BeamDeck window after opening it, then join the server.
 
-**For Windows players:** `./make-friend-zip.sh [output-folder] [ws://relay:47140]` builds `BeamDeck-Windows.zip` (into `dist/` by default) with the Windows files, the mod, this README and a `RELAY.txt` with the relay address.
+**For Windows players:** `./make-friend-zip.sh [output-folder] [ws://server-address:47140]` builds `BeamDeck-Windows.zip` (into `dist/` by default) with the Windows files, the mod, this README and a `RELAY.txt` with the relay address.
 
 ## Game Controls
 
