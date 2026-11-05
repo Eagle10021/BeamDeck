@@ -100,10 +100,10 @@ On a BeamMP server, each player's car plays that player's music, and you hear th
 
 The BeamMP server only hands out the **game mod** (`Resources/Client/beamdeck.zip`): the scripts that track cars, positions and screens. The sound is played by the **BeamDeck app** (helper + window), which a game mod can't contain, so each friend installs it once. Without it nothing breaks; they just don't hear anyone's car music and theirs isn't shared.
 
-* **Make the package:** `make-friend-zip.sh [folder] [relay]` builds `BeamDeck-Windows.zip` (into `dist/` by default): the Windows files, the mod, and [`FRIEND-INSTALL.txt`](../FRIEND-INSTALL.txt) with the relay address filled in (from your BeamDeck settings, or the second argument). Send it to them.
+* **Make the package:** `make-friend-zip.sh [folder] [relay]` builds `BeamDeck-Windows.zip` (into `dist/` by default): the Windows files, the mod, and the README and a `RELAY.txt` with the relay address (from the BeamDeck settings, or the second argument). Send it to them.
 * **Their side, once:** `winget install Python.Python.3.12 Gyan.FFmpeg yt-dlp.yt-dlp`; unzip; `powershell -ExecutionPolicy Bypass -File install.ps1`; be on the same Tailscale network as the server; BeamDeck → **Settings → Multiplayer** → relay address → **Test** ("Connected").
 * **Their side, every time:** open BeamDeck first and leave the window open (click it once so it may play sound), join the server (BeamMP downloads or updates the mod), play their own music in BeamDeck. **Car → Share my music** keeps theirs private.
-* **Android Auto** works for them too with an Android phone and a USB cable (no developer mode); the optional section of `FRIEND-INSTALL.txt` covers it: install with `-AndroidAuto`, the one-time **Zadig → WinUSB** swap for the phone's car-mode ID 18D1 2D01, "Add new cars to Android Auto", Set up screen, and keeping the head unit window visible. Its sound needs VB-CABLE + `svcl.exe`. App sound and Navidrome are optional extras.
+* **Android Auto** works for them too with an Android phone and a USB cable (no developer mode); the README's Android Auto Setup covers it: install with `-AndroidAuto`, the one-time **Zadig → WinUSB** swap for the phone's car-mode ID 18D1 2D01, "Add new cars to Android Auto", Set up screen, and keeping the head unit window visible. Its sound needs VB-CABLE + `svcl.exe`. App sound and Navidrome are optional extras.
 
 ## 4. Why It's Built This Way
 

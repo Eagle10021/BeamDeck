@@ -108,7 +108,7 @@ winget install Python.Python.3.12 Gyan.FFmpeg yt-dlp.yt-dlp
 powershell -ExecutionPolicy Bypass -File install.ps1                # add -AndroidAuto to download the head unit
 ```
 
-For app sound or Android Auto's sound: install VB-CABLE, and copy `svcl.exe` into `%LOCALAPPDATA%\BeamDeck\app`. Keep the normal speakers or headphones as the default output device. [`FRIEND-INSTALL.txt`](FRIEND-INSTALL.txt) has the same steps written out for a player joining a server.
+For app sound or Android Auto's sound: install VB-CABLE, and copy `svcl.exe` into `%LOCALAPPDATA%\BeamDeck\app`. Keep the normal speakers or headphones as the default output device.
 
 ### 3. First Run
 
@@ -130,11 +130,17 @@ Android phones only; Apple CarPlay isn't possible (see [Android Auto](#android-a
 
 1. On the phone: **Android Auto settings → Previously connected cars → ⋮ → Add new cars to Android Auto** must be on.
 2. Plug the phone in by USB and turn on **Car → Android Auto** in the BeamDeck window. The phone switches to car mode and a window titled **Android Auto - Desktop Head Unit** opens (on Windows, keep it visible somewhere on screen; BeamDeck copies its picture).
-3. **Windows only, once per PC:** in car mode the phone appears as USB ID `18D1 2D01`, which Windows binds to the wrong driver. Run `adb kill-server`, turn Android Auto on in BeamDeck, then in **Zadig** (Options → List All Devices, untick "Ignore Hubs or Composite Parents") pick the composite device `18D1 2D01` (current driver `usbccgp`), choose **WinUSB** and **Replace Driver**. Unplug, replug, and turn Android Auto off and on.
+3. **Windows only, once per PC:** in car mode the phone appears as USB ID `18D1 2D01`, which Windows binds to the wrong driver. Run `adb kill-server`, turn Android Auto on in BeamDeck, then in **Zadig** (Options → List All Devices, untick "Ignore Hubs or Composite Parents") pick the composite device `18D1 2D01` (current driver `usbccgp`), choose **WinUSB** and **Replace Driver**. Unplug, replug, and turn Android Auto off and on. Normal phone USB (file transfer, charging) is unaffected, since that's a different USB ID. To undo it: **Device Manager → Universal Serial Bus devices →** the phone's entry **→ Uninstall device**, tick "Attempt to remove the driver", and replug.
 4. **Set up the screen once per car model:** sit in the car, press **Car → Set up screen**, click the screen's four corners in the game, move the camera a little (W/S), and click the four corners again. Clicking the car's screen then taps Android Auto.
 5. **Car → Game map** puts BeamNG's map over Google Maps.
 
-**Wi-Fi (optional):** enable Android Auto's developer mode (tap **Version** 10 times), connect `adb` over Wireless debugging (`adb pair`, then `adb connect <phone-ip>:<port>`), start **⋮ → Start head unit server** on the phone, and set **Settings → Android Auto → Phone connection** to **Head unit server**.
+**Wi-Fi (optional; the phone and PC on the same network):**
+
+1. Install `adb`: on Linux the `android-tools` package; on Windows `winget install Google.PlatformTools`, then **restart the PC** so BeamDeck finds it.
+2. Phone, once: **Settings → About phone →** tap **Build number** 7 times (developer options), then **Developer options → Wireless debugging → Pair device with pairing code**, and on the PC run `adb pair <phone-ip>:<pairing-port>` with the 6-digit code.
+3. Phone, once: **Android Auto settings →** tap **Version** 10 times (Android Auto's developer mode).
+4. BeamDeck: **Settings → Android Auto → Phone connection: Head unit server**, then **Save**.
+5. Each time: turn on Wireless debugging, run `adb connect <phone-ip>:<port>` (the port on the phone's Wireless debugging screen changes each time), start **Android Auto settings → ⋮ → Start head unit server**, then **Car → Android Auto** in BeamDeck.
 
 ## Multiplayer Setup (BeamMP)
 
@@ -166,7 +172,7 @@ Android phones only; Apple CarPlay isn't possible (see [Android Auto](#android-a
 3. **Car** tab: **Share my music**, **Share my screen** and **Voice chat** are on by default. **Settings → Multiplayer** has push to talk, the microphone and the voice sensitivity. Allow the microphone when the window asks, and use headphones for voice chat.
 4. Click once anywhere in the BeamDeck window after opening it, then join the server.
 
-**For Windows players:** `./make-friend-zip.sh [output-folder] [ws://relay:47140]` builds `BeamDeck-Windows.zip` (into `dist/` by default) with the Windows files, the mod and `FRIEND-INSTALL.txt` with the relay address filled in.
+**For Windows players:** `./make-friend-zip.sh [output-folder] [ws://relay:47140]` builds `BeamDeck-Windows.zip` (into `dist/` by default) with the Windows files, the mod, this README and a `RELAY.txt` with the relay address.
 
 ## Game Controls
 

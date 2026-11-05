@@ -4,3 +4,6 @@ BeamDeck-Windows.zip
 dist/
 __pycache__/
 *.pyc
+
+# local-only install notes template (the README has the same steps)
+FRIEND-INSTALL.txt
