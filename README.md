@@ -28,7 +28,8 @@
   &nbsp;
   <img src="screenshots/window-car-tab.png" alt="The BeamDeck window on its Car tab: car screens, car audio, bass shake, multiplayer sharing, voice chat and Android Auto controls" width="27%">
 </p>
-<p align="center"><sub>Left: Android Auto from a phone on a car's dash, with the game's map in the Maps pane. Right: the BeamDeck window, Car tab.</sub></p>
+<p align="center"><sub>Left: Android Auto from a phone on a car's dash, with the game's map in the Maps pane. 
+Right: the BeamDeck window, Car tab.</sub></p>
 
 BeamDeck has three parts: a small **helper** program, a **control window** (an app-style browser window, where things are picked and where the sound plays) and a **BeamNG mod** (it puts the picture on the car's screens and reports where the car and camera are, so the sound behaves like it comes from the car). An optional **relay** connects players on a BeamMP server.
 
