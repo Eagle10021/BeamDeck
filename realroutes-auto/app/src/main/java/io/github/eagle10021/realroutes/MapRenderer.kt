@@ -228,8 +228,12 @@ class MapRenderer(private val ctx: CarContext) : SurfaceCallback {
         routeColor()
         val b = banner
         if (e == null) {
-            sirenL?.alpha = 0f; sirenR?.alpha = 0f
-            b?.animate()?.alpha(0f)?.setDuration(400)?.withEndAction { b.visibility = View.GONE }?.start()
+            sirenL?.animate()?.alpha(0f)?.setInterpolator(M3Spring.EFFECTS)?.setDuration(M3Spring.EFFECTS.durationMs)?.start()
+            sirenR?.animate()?.alpha(0f)?.setInterpolator(M3Spring.EFFECTS)?.setDuration(M3Spring.EFFECTS.durationMs)?.start()
+            // the banner shrinks away (spatial) as it fades (effects)
+            b?.animate()?.scaleX(.8f)?.scaleY(.8f)?.translationY(height * 0.08f)?.alpha(0f)
+                ?.setInterpolator(M3Spring.SPATIAL)?.setDuration(M3Spring.SPATIAL.durationMs)
+                ?.withEndAction { b.visibility = View.GONE; b.scaleX = 1f; b.scaleY = 1f }?.start()
             line("route-glow")?.setProperties(PropertyFactory.lineOpacity(0.22f), PropertyFactory.lineWidth(18f))
             line("route-draw")?.setProperties(PropertyFactory.visibility(Property.NONE))
             line("route")?.setProperties(PropertyFactory.visibility(Property.VISIBLE))
@@ -247,8 +251,8 @@ class MapRenderer(private val ctx: CarContext) : SurfaceCallback {
         main.postDelayed({
             if (emg != e) return@postDelayed
             siren.cancel()
-            sirenL?.animate()?.alpha(0f)?.setDuration(1500)?.start()
-            sirenR?.animate()?.alpha(0f)?.setDuration(1500)?.start()
+            sirenL?.animate()?.alpha(0f)?.setInterpolator(M3Spring.EFFECTS_SLOW)?.setDuration(1000)?.start()
+            sirenR?.animate()?.alpha(0f)?.setInterpolator(M3Spring.EFFECTS_SLOW)?.setDuration(1000)?.start()
         }, 10000)
         // the route's glow breathes
         anims += ValueAnimator.ofFloat(0f, (2 * Math.PI).toFloat()).apply {
@@ -260,9 +264,18 @@ class MapRenderer(private val ctx: CarContext) : SurfaceCallback {
         if (b != null) {
             b.text = "EMERGENCY\n${e.dest}\n" + if (e.medical) "Medical: to the hospital" else "As fast as you can"
             placeBanner(b)
-            b.alpha = 0f; b.translationY = height * 0.2f; b.visibility = View.VISIBLE
-            b.animate().alpha(1f).translationY(0f).setDuration(600).start()
-            main.postDelayed({ if (emg == e) { b.text = "EMERGENCY"; placeBanner(b) } }, 7000)   // then a small chip
+            // springs up into place with a little bounce (spatial fast) while fading in (effects)
+            b.alpha = 0f; b.translationY = height * 0.2f; b.scaleX = .7f; b.scaleY = .7f; b.visibility = View.VISIBLE
+            b.animate().translationY(0f).scaleX(1f).scaleY(1f)
+                .setInterpolator(M3Spring.SPATIAL_FAST).setDuration(M3Spring.SPATIAL_FAST.durationMs * 3 / 2).start()
+            android.animation.ObjectAnimator.ofFloat(b, View.ALPHA, 0f, 1f).apply {
+                interpolator = M3Spring.EFFECTS; duration = M3Spring.EFFECTS_SLOW.durationMs; start() }
+            main.postDelayed({                                          // then a small chip, with a squish as it shrinks
+                if (emg != e) return@postDelayed
+                b.text = "EMERGENCY"; placeBanner(b)
+                b.scaleX = 1.14f; b.scaleY = .82f
+                b.animate().scaleX(1f).scaleY(1f).setInterpolator(M3Spring.SPATIAL_FAST).setDuration(M3Spring.SPATIAL_FAST.durationMs).start()
+            }, 7000)
         }
     }
 
@@ -299,9 +312,9 @@ class MapRenderer(private val ctx: CarContext) : SurfaceCallback {
         val red = Color.parseColor(RED)
         anims += ValueAnimator.ofFloat(0f, 1f).apply {
             startDelay = 700; duration = 1800
-            interpolator = android.view.animation.DecelerateInterpolator(2f)
+            interpolator = M3Spring.SPATIAL_SLOW                       // overshoot is clamped: the line can't pass its end
             addUpdateListener { v ->
-                val f = (v.animatedValue as Float).coerceAtLeast(0.0001f)
+                val f = (v.animatedValue as Float).coerceIn(0.0001f, 1f)
                 draw?.setProperties(PropertyFactory.lineGradient(Expression.step(Expression.lineProgress(),
                     Expression.color(red), Expression.stop(f, Expression.color(Color.TRANSPARENT)))))
             }

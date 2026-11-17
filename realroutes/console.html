@@ -8,14 +8,29 @@
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="maplibre/maplibre-gl.css">
 <script src="maplibre/maplibre-gl.js"></script>
+<script src="m3color.js"></script>
 <link rel="icon" href="icon.svg">
-<meta name="theme-color" content="#070a14">
+<meta name="theme-color" content="#0c0e17">
 <meta name="mobile-web-app-capable" content="yes">
 <style>
+  /* Material 3 Expressive dark scheme (colour spec 2025), seeded from the console's pink with navy neutrals;
+     the status colours are harmonised toward the seed. Generated with material-color-utilities. */
   :root {
-    --bg: #070a14; --panel: #111628; --panel2: #171d34; --line: rgba(255,255,255,.08);
-    --text: #eef1fb; --muted: #9aa3c2; --dim: #5d6685;
-    --ok: #4fd18b; --late: #ffb547; --early: #6cb6ff; --bad: #ff5d6c; --accent: #e7a1c4;
+    --md-primary: #ffaad6; --md-on-primary: #6c214f; --md-primary-container: #fa97cc; --md-on-primary-container: #601645;
+    --md-secondary: #bdc5eb; --md-on-secondary: #373f5e; --md-secondary-container: #1c2442; --md-on-secondary-container: #9ba2c7;
+    --md-tertiary: #ffb68c; --md-on-tertiary: #6a3003; --md-tertiary-container: #fba470; --md-on-tertiary-container: #5c2700;
+    --md-surface: #0c0e17; --md-surface-bright: #262b3f; --md-surface-container-low: #10131e; --md-surface-container: #161926;
+    --md-surface-container-high: #1b1f2e; --md-surface-container-highest: #212537;
+    --md-on-surface: #e1e4fc; --md-on-surface-variant: #a6aac1; --md-outline: #717489; --md-outline-variant: #43475a;
+    --ok: #85da78; --on-ok: #003a04; --ok-container: #005308; --on-ok-container: #a0f791;
+    --late: #ffb77d; --on-late: #4d2600; --late-container: #6d3a02; --on-late-container: #ffdcc3;
+    --early: #aec6ff; --on-early: #002e6a; --early-container: #16448c; --on-early-container: #d8e2ff;
+    --bad: #ffb1c4; --on-bad: #65002e; --bad-container: #8f0044; --on-bad-container: #ffd9e1;
+    /* the names the rest of the page uses */
+    --bg: var(--md-surface); --panel: var(--md-surface-container); --panel2: var(--md-surface-container-high);
+    --line: color-mix(in srgb, var(--md-outline-variant) 70%, transparent);
+    --text: var(--md-on-surface); --muted: var(--md-on-surface-variant); --dim: var(--md-outline); --accent: var(--md-primary);
+    --glass: color-mix(in srgb, var(--md-surface-container) 90%, transparent);
   }
   * { box-sizing: border-box; margin: 0; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
@@ -47,9 +62,9 @@
   .trip small { color: var(--muted); font-size: 13px; }
   .toggle { display: flex; background: var(--panel2); border-radius: 12px; padding: 4px; gap: 4px; }
   .toggle button { flex: 1; padding: 9px; border-radius: 9px; background: none; color: var(--muted); font-size: 15px; }
-  .toggle button.on { background: #2a3150; color: var(--text); }
-  .go { padding: 16px; border-radius: 14px; background: var(--ok); color: #04170d; font-weight: 800; font-size: 20px; }
-  .go:disabled { background: #2a3150; color: var(--dim); }
+  .toggle button.on { background: var(--md-primary); color: var(--md-on-primary); font-weight: 700; }
+  .go { padding: 16px; border-radius: 14px; background: var(--ok); color: var(--on-ok); font-weight: 800; font-size: 20px; }
+  .go:disabled { background: color-mix(in srgb, var(--md-on-surface) 12%, transparent); color: color-mix(in srgb, var(--md-on-surface) 38%, transparent); }
   .hint { font-size: 13px; color: var(--muted); }
 
   /* ---------- driving ---------- */
@@ -66,7 +81,7 @@
   .ok { color: var(--ok); } .late { color: var(--late); } .early { color: var(--early); } .bad { color: var(--bad); }
   .nextname { font-size: 34px; font-weight: 800; line-height: 1.1; }
   .nextmeta { display: flex; gap: 16px; font-size: 18px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
-  .bell { display: none; align-items: center; gap: 10px; background: rgba(255,93,108,.15); color: var(--bad);
+  .bell { display: none; align-items: center; gap: 10px; background: var(--bad-container); color: var(--on-bad-container);
     border-radius: 12px; padding: 10px 14px; font-size: 22px; font-weight: 800; animation: blink 1s infinite; }
   .bell.on { display: flex; }
   .dwell { display: none; background: var(--panel2); border-radius: 12px; padding: 10px 14px; font-size: 19px; }
@@ -84,17 +99,17 @@
   .ctrl { display: flex; flex-direction: column; gap: 10px; }
   .ctrl button { flex: 1; border-radius: 16px; background: var(--panel2); font-size: 19px; font-weight: 700;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 64px; }
-  .ctrl button.doors { flex: 2.2; font-size: 24px; background: #20305a; }
-  .ctrl button.doors.open { background: var(--late); color: #231400; }
+  .ctrl button.doors { flex: 2.2; font-size: 24px; background: var(--md-primary-container); color: var(--md-on-primary-container); }
+  .ctrl button.doors.open { background: var(--late); color: var(--on-late); }
   .ctrl button:active { transform: scale(.97); }
-  .ctrl button.end { flex: .8; background: #3a1820; color: #ffb3bd; font-size: 15px; }
+  .ctrl button.end { flex: .8; background: var(--bad-container); color: var(--on-bad-container); font-size: 15px; }
   .ctrl svg { width: 30px; height: 30px; }
   .log { grid-column: 1 / 3; display: flex; gap: 8px; overflow: hidden; padding: 10px 14px; font-size: 14px; }
   .log span { white-space: nowrap; padding: 3px 10px; border-radius: 99px; background: var(--panel2); }
-  .log .bad { background: rgba(255,93,108,.14); } .log .warn { background: rgba(255,181,71,.14); color: var(--late); }
-  .comfort { height: 8px; border-radius: 4px; background: #23293f; overflow: hidden; margin-top: 4px; }
+  .log .bad { background: var(--bad-container); color: var(--on-bad-container); } .log .warn { background: var(--late-container); color: var(--on-late-container); }
+  .comfort { height: 8px; border-radius: 4px; background: var(--md-surface-container-highest); overflow: hidden; margin-top: 4px; }
   .comfort i { display: block; height: 100%; background: var(--ok); }
-  .summary { position: fixed; inset: 0; z-index: 50; background: rgba(4,6,12,.85); display: none; place-items: center; }
+  .summary { position: fixed; inset: 0; z-index: 50; background: color-mix(in srgb, #000 72%, transparent); display: none; place-items: center; }
   .summary.on { display: grid; }
   .summary .card { width: 560px; text-align: center; padding: 28px; }
   .summary .score { font-size: 96px; font-weight: 800; }
@@ -105,7 +120,7 @@
   .modes { position: fixed; top: 22px; right: 26px; z-index: 5; display: flex; background: var(--panel2); border: 1px solid var(--line);
     border-radius: 12px; padding: 4px; gap: 4px; }
   .modes button { padding: 8px 18px; border-radius: 9px; background: none; color: var(--muted); font-weight: 700; font-size: 15px; }
-  .modes button.on { background: #2a3150; color: var(--text); }
+  .modes button.on { background: var(--md-primary); color: var(--md-on-primary); }
   body.driving .modes { display: none; }
 
   /* ---------- rides ---------- */
@@ -114,22 +129,22 @@
   .mapbox { padding: 0; overflow: hidden; position: relative; }
   .mapbox .maplibregl-map { width: 100%; height: 100%; background: #0b1020; border-radius: 18px; }
   .pinlabel { position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); white-space: nowrap;
-    background: rgba(10,13,24,.85); color: #fff; font: 600 13px system-ui, sans-serif; padding: 3px 8px; border-radius: 7px; }
+    background: var(--glass); color: #fff; font: 600 13px system-ui, sans-serif; padding: 3px 8px; border-radius: 7px; }
   .stopdot { border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 4px #000; }
   .mapctl { position: absolute; left: 12px; top: 12px; z-index: 5; display: flex; gap: 8px; }
-  .mapctl button { padding: 9px 14px; border-radius: 12px; background: rgba(17,22,40,.88); color: var(--text);
+  .mapctl button { padding: 9px 14px; border-radius: 12px; background: var(--glass); color: var(--text);
     font-weight: 700; font-size: 15px; border: 1px solid var(--line); }
   .meicon { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center;
     background: rgba(255,122,26,.18); border: 2px solid rgba(255,122,26,.75); box-shadow: 0 0 12px rgba(255,122,26,.5); }
   .meicon div { width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent;
     border-bottom: 22px solid #fff; margin-top: -4px; filter: drop-shadow(0 0 2px #000); }
-  .ov { position: absolute; z-index: 4; background: rgba(14,17,28,.88); border: 1px solid var(--line); border-radius: 16px;
+  .ov { position: absolute; z-index: 4; background: var(--glass); border: 1px solid var(--line); border-radius: 16px;
     color: var(--text); pointer-events: none; }
   .ov-place { top: 62px; left: 12px; padding: 8px 14px; display: none; }
   .ov-place b { display: block; font-size: 19px; } .ov-place span { font-size: 13px; color: var(--muted); }
   .ov-speed { left: 12px; bottom: 34px; padding: 10px 16px; display: flex; gap: 16px; align-items: center; }
   .ov-speed b { font-size: 40px; font-weight: 800; line-height: 1; } .ov-speed small { display: block; font-size: 12px; color: var(--muted); }
-  .ov-speed .comp { width: 46px; height: 46px; border-radius: 50%; border: 2px solid #2f3650; display: grid; place-items: center;
+  .ov-speed .comp { width: 46px; height: 46px; border-radius: 50%; border: 2px solid var(--md-outline-variant); display: grid; place-items: center;
     font-size: 11px; color: #ff7a1a; font-weight: 800; position: relative; }
   .ov-speed .comp i { position: absolute; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent;
     border-bottom: 16px solid #ff7a1a; top: 7px; left: 15px; transform-origin: 6px 14px; }
@@ -147,7 +162,7 @@
   @keyframes sirenA { 0%, 45% { opacity: .9; } 55%, 100% { opacity: .15; } }
   @keyframes sirenB { 0%, 45% { opacity: .15; } 55%, 100% { opacity: .9; } }
   .ov-emg { left: 50%; top: 16px; transform: translate(-50%, -140%); padding: 10px 22px; text-align: center; display: block;
-    background: linear-gradient(135deg, #b0122a, #6d0a1c); border-color: #ff4d63; transition: transform .6s cubic-bezier(.2,1.4,.4,1);
+    background: linear-gradient(135deg, #b0122a, #6d0a1c); border-color: #ff4d63;
     box-shadow: 0 8px 30px rgba(255,30,60,.45); min-width: 260px; }
   .ov-emg.on { transform: translate(-50%, 0); }
   .ov-emg b { display: block; font-size: 13px; letter-spacing: .3em; color: #ffd0d6; }
@@ -165,13 +180,13 @@
   @keyframes hosp { 70% { box-shadow: 0 0 0 16px rgba(232,39,59,0); } 100% { box-shadow: 0 0 0 0 rgba(232,39,59,0); } }
   .pin { width: 22px; height: 22px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 6px #000; }
   .recenter { position: absolute; right: 12px; bottom: 12px; z-index: 500; padding: 10px 14px; border-radius: 12px;
-    background: rgba(17,22,40,.9); color: var(--text); font-weight: 700; display: none; }
+    background: var(--glass); color: var(--text); font-weight: 700; display: none; }
   .recenter.on { display: block; }
   .subs { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 15px; text-align: left; margin-top: 8px; }
   .subs b { color: #ffcf4a; letter-spacing: 1px; }
   .timer { font-size: 30px; font-weight: 800; } .timer small { font-size: 15px; color: var(--muted); font-weight: 500; }
   .stopsHead { display: flex; justify-content: flex-end; margin-bottom: 8px; }
-  .av { border-radius: 50%; object-fit: cover; background: #23293f; flex: none; }
+  .av { border-radius: 50%; object-fit: cover; background: var(--md-surface-container-highest); flex: none; }
   .who { display: flex; gap: 16px; align-items: center; }
   .credit { font-size: 11px; color: var(--dim); }
   .rtabs { width: 420px; }
@@ -189,12 +204,12 @@
   #rides .bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 22px; padding: 12px 18px; padding-right: 220px; }
   #rides .bar h1 { font-size: 26px; }
   .kpi b { display: block; font-size: 26px; } .kpi span { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-  .online { margin-left: auto; padding: 12px 22px; border-radius: 14px; font-weight: 800; font-size: 18px; background: var(--ok); color: #04170d; }
-  .online.off { background: #3a1820; color: #ffb3bd; }
+  .online { margin-left: auto; padding: 12px 22px; border-radius: 14px; font-weight: 800; font-size: 18px; background: var(--ok); color: var(--on-ok); }
+  .online.off { background: var(--bad-container); color: var(--on-bad-container); }
   .rmain { display: flex; flex-direction: column; justify-content: center; gap: 16px; position: relative; overflow: hidden; }
   .big1 { font-size: 40px; font-weight: 800; line-height: 1.1; }
   .big2 { font-size: 22px; color: var(--muted); }
-  .pulse { width: 120px; height: 120px; border-radius: 50%; background: rgba(79,209,139,.15); border: 2px solid var(--ok);
+  .pulse { width: 120px; height: 120px; border-radius: 50%; background: color-mix(in srgb, var(--ok) 15%, transparent); border: 2px solid var(--ok);
     animation: pl 1.8s infinite; margin: 0 auto 10px; display: grid; place-items: center; font-size: 46px; }
   @keyframes pl { 50% { transform: scale(1.08); opacity: .6; } }
   .reqrow { display: grid; grid-template-columns: 26px 1fr; gap: 6px 10px; font-size: 20px; align-items: start; }
@@ -203,11 +218,11 @@
   .fare { font-size: 52px; font-weight: 800; } .surge { font-size: 16px; color: var(--late); font-weight: 700; }
   .rbtns { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
   .rbtns button { padding: 20px; border-radius: 16px; font-size: 22px; font-weight: 800; }
-  .accept { background: var(--ok); color: #04170d; position: relative; overflow: hidden; }
+  .accept { background: var(--ok); color: var(--on-ok); position: relative; overflow: hidden; }
   .accept i { position: absolute; left: 0; bottom: 0; height: 6px; background: rgba(0,0,0,.35); }
   .declinebtn { background: var(--panel2); color: var(--muted); }
   .rside { display: flex; flex-direction: column; gap: 12px; }
-  .note { background: rgba(255,181,71,.12); color: var(--late); border-radius: 10px; padding: 8px 12px; font-size: 16px; }
+  .note { background: var(--late-container); color: var(--on-late-container); border-radius: 10px; padding: 8px 12px; font-size: 16px; }
   .stars { font-size: 44px; color: #ffcf4a; letter-spacing: 4px; }
 
   /* ---------- music bar (BeamDeck's player, the captured app, or Android Auto) ---------- */
@@ -220,8 +235,8 @@
   .music button { flex: none; width: 58px; height: 44px; border-radius: 12px; background: var(--panel2);
     display: grid; place-items: center; }
   .music button svg { pointer-events: none; }
-  .music button.pp { width: 76px; background: #2a3150; }
-  .music button:active { background: var(--accent); color: #1a0d14; }
+  .music button.pp { width: 76px; background: var(--md-primary-container); color: var(--md-on-primary-container); }
+  .music button:active { background: var(--accent); color: var(--md-on-primary); }
   .music .vol { width: 46px; color: var(--muted); }
   .music .time { flex: none; font-size: 14px; color: var(--muted); min-width: 92px; text-align: right; }
   .music .clock { flex: none; font-size: 20px; font-weight: 700; padding: 0 6px 0 4px; }
@@ -236,9 +251,10 @@
   .voicebox select { width: 100%; font-size: 15px; padding: 8px; border-radius: 10px; background: var(--panel); color: var(--text); border: 1px solid var(--line); }
   .voicebox .hint { margin-top: 10px; }
   .tag { display: inline-block; font-size: 13px; font-weight: 700; padding: 3px 9px; border-radius: 999px; margin: 6px 6px 0 0;
-    background: #2a3150; color: var(--text); }
-  .tag.long { background: #26405f; } .tag.air { background: #3b2a5f; } .tag.night { background: #4a2a40; } .tag.chg { background: #5a3a12; }
-  .tag.emg { background: #8a1f2d; }
+    background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+  .tag.long { background: var(--early-container); color: var(--on-early-container); } .tag.air { background: var(--md-tertiary-container); color: var(--md-on-tertiary-container); }
+  .tag.night { background: var(--md-secondary-container); color: var(--md-on-secondary-container); } .tag.chg { background: var(--late-container); color: var(--on-late-container); }
+  .tag.emg { background: var(--bad-container); color: var(--on-bad-container); }
   .days { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 16px; }
   .days th { text-align: left; color: var(--muted); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; padding: 6px 8px; }
   .days td { padding: 9px 8px; border-top: 1px solid var(--line); }
@@ -247,6 +263,69 @@
   .updating { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); z-index: 40; background: var(--panel2);
     border: 1px solid var(--line); border-radius: 999px; padding: 8px 18px; font-weight: 700; display: none; }
   .updating.on { display: block; }
+
+  /* ---------- motion: Material 3 Expressive springs ----------
+     Spatial springs (position, size, shape) overshoot and settle; effects springs (opacity, colour) never overshoot.
+     The curves are sampled spring step responses: bouncy = damping 0.6 / stiffness 800 (spatial fast),
+     spatial = damping 0.8 / stiffness 380, effects = damping 1 (critically damped). */
+  :root {
+    --m3-bouncy: linear(0, 0.028, 0.099, 0.2, 0.317, 0.44, 0.561, 0.674, 0.775, 0.862, 0.934, 0.991, 1.034, 1.064, 1.083, 1.092, 1.095, 1.091, 1.084, 1.074, 1.063, 1.051, 1.04, 1.03, 1.02, 1.012, 1.005, 1, 0.996, 0.994, 0.992, 0.991, 0.991, 0.991, 0.992, 0.993, 0.994, 0.995, 0.996, 0.997, 1);
+    --m3-spatial: linear(0, 0.019, 0.067, 0.135, 0.215, 0.301, 0.387, 0.471, 0.551, 0.624, 0.69, 0.749, 0.8, 0.844, 0.882, 0.913, 0.938, 0.959, 0.975, 0.988, 0.997, 1.004, 1.009, 1.012, 1.014, 1.015, 1.015, 1.015, 1.014, 1.013, 1.011, 1.01, 1.009, 1.007, 1.006, 1.005, 1.004, 1.003, 1.003, 1.002, 1);
+    --m3-effects: linear(0, 0.021, 0.073, 0.142, 0.22, 0.301, 0.38, 0.455, 0.525, 0.589, 0.645, 0.696, 0.74, 0.779, 0.812, 0.841, 0.866, 0.887, 0.905, 0.921, 0.934, 0.945, 0.954, 0.962, 0.968, 0.973, 0.978, 0.982, 0.985, 0.987, 0.99, 0.991, 0.993, 0.994, 0.995, 0.996, 0.997, 0.997, 0.998, 0.998, 1);
+    --d-spatial-fast: 350ms; --d-spatial: 420ms; --d-spatial-slow: 570ms;
+    --d-effects-fast: 140ms; --d-effects: 220ms; --d-effects-slow: 300ms;
+  }
+  @supports not (transition-timing-function: linear(0, 1)) {
+    :root { --m3-bouncy: cubic-bezier(.34, 1.45, .64, 1); --m3-spatial: cubic-bezier(.3, 1.1, .5, 1); --m3-effects: cubic-bezier(.2, 0, 0, 1); }
+  }
+  @keyframes m3-fade { from { opacity: 0; } }
+  @keyframes m3-rise { from { translate: 0 18px; } }
+  @keyframes m3-pop { from { scale: .86; } }
+  @keyframes m3-drop { from { translate: 0 -160%; } }
+  @keyframes m3-squish { from { scale: 1.14 .82; } }
+  /* buttons: the corners tighten and the button sinks a little while pressed, springing back on release */
+  /* the press is quick and firm; the release is a looser spring (damping 0.38) so the button visibly boings back,
+     overshooting its size and corner radius before it settles */
+  :root { --m3-boing: linear(0, 0.039, 0.142, 0.288, 0.459, 0.637, 0.806, 0.957, 1.081, 1.175, 1.237, 1.269, 1.274, 1.258, 1.226, 1.184, 1.136, 1.087, 1.041, 1.002, 0.97, 0.947, 0.932, 0.925, 0.925, 0.931, 0.941, 0.953, 0.966, 0.98, 0.992, 1.002, 1.01, 1.016, 1.019, 1.021, 1.02, 1.018, 1.015, 1.012, 1.008, 1.005, 1.001, 0.999, 0.997, 0.995, 0.994, 0.994, 0.995, 0.995, 1); --d-boing: 591ms; }
+  @supports not (transition-timing-function: linear(0, 1)) { :root { --m3-boing: cubic-bezier(.3, 1.9, .5, 1); } }
+  button { transition: border-radius var(--d-boing) var(--m3-boing), scale var(--d-boing) var(--m3-boing),
+    background-color var(--d-effects) var(--m3-effects), color var(--d-effects) var(--m3-effects),
+    outline-color var(--d-effects) var(--m3-effects); }
+  button:active:not(:disabled) { border-radius: 6px; scale: .9;
+    transition: border-radius var(--d-spatial-fast) var(--m3-bouncy), scale var(--d-spatial-fast) var(--m3-bouncy),
+      background-color var(--d-effects-fast) var(--m3-effects); }
+  /* a segment that becomes selected pops in */
+  @keyframes m3-select { from { scale: .82; } }
+  .routes button.sel, .pat.sel, .trip.sel { animation: m3-select var(--d-boing) var(--m3-boing); }
+  .ctrl button:active { transform: none; }
+  /* screens, pages and pop-ups come in with a fade and a small spring up; they start whenever they become displayed */
+  /* shared axis: a page slides in from the side of the tab that was picked (--dir is +1 for a tab to the right, -1 to
+     the left) and fades in, so switching tabs reads as moving sideways through them */
+  @keyframes m3-axis { from { translate: calc(var(--dir, 1) * 64px) 0; scale: .98; } }
+  .view.on, .rpage, #rides .mapbox, #rides .rcol { animation: m3-fade var(--d-effects-slow) var(--m3-effects) backwards,
+    m3-axis var(--d-spatial-slow) var(--m3-spatial) backwards; }
+  /* tab indicator: one pill per tab row that springs from tab to tab, the leading edge first, so it stretches
+     toward the new tab and snaps in behind it */
+  .toggle { position: relative; } .toggle, .modes { isolation: isolate; }   /* .modes is fixed: already a containing block */
+  .m3-ind { position: absolute; z-index: -1; border-radius: 9px; background: var(--md-primary); pointer-events: none;
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--md-primary) 30%, transparent); }
+  .has-ind > button.on { background: transparent; }
+  .has-ind > button { transition: color var(--d-effects-slow) var(--m3-effects), scale var(--d-boing) var(--m3-boing),
+    border-radius var(--d-boing) var(--m3-boing); }
+  .summary.on { animation: m3-fade var(--d-effects-slow) var(--m3-effects) backwards; }
+  .summary.on .card { animation: m3-pop var(--d-spatial-slow) var(--m3-bouncy) backwards, m3-fade var(--d-effects) var(--m3-effects) backwards; }
+  .voicebox.on { transform-origin: 90% 100%; animation: m3-pop var(--d-spatial) var(--m3-bouncy) backwards, m3-fade var(--d-effects) var(--m3-effects) backwards; }
+  .updating.on { animation: m3-drop var(--d-spatial-slow) var(--m3-bouncy) backwards; }
+  .bell.on, .dwell.on { animation: m3-pop var(--d-spatial) var(--m3-bouncy) backwards, m3-fade var(--d-effects) var(--m3-effects) backwards; }
+  .recenter.on { animation: m3-pop var(--d-spatial-fast) var(--m3-bouncy) backwards; }
+  .comfort i { transition: width var(--d-spatial-slow) var(--m3-spatial), background-color var(--d-effects-slow) var(--m3-effects); }
+  /* emergency: the banner springs down, then squishes into the small chip */
+  .ov-emg { transition: transform var(--d-spatial-slow) var(--m3-bouncy), opacity var(--d-effects) var(--m3-effects), visibility 0s; }
+  .ov-emg:not(.on) { opacity: 0; visibility: hidden;          /* tucked away: its red shadow mustn't show at the map's top */
+    transition: transform var(--d-spatial) var(--m3-spatial), opacity var(--d-effects) var(--m3-effects), visibility 0s var(--d-spatial); }
+  .ov-emg.small { animation: m3-squish var(--d-spatial) var(--m3-bouncy); }
+  .siren.on { transition: opacity 1s var(--m3-effects); }
+  .ov-speed .comp i { transition: transform var(--d-spatial) var(--m3-spatial); }
 </style>
 </head>
 <body>
@@ -435,6 +514,14 @@ $("start").onclick = async () => {
 };
 
 // ---------- driving ----------
+// Material 3 Expressive springs as easing functions over a fixed duration: the step response of a spring with the
+// given damping ratio, stiffness chosen so it has settled (within 0.2 %) at t = 1. 0.8 = spatial, 0.6 = bouncy, 1 = effects.
+const m3spring = z => {
+  const w = 6.2 / z, wd = w * Math.sqrt(Math.max(0, 1 - z * z));
+  return t => t >= 1 ? 1 : z < 1 ? 1 - Math.exp(-z * w * t) * (Math.cos(wd * t) + z * w / wd * Math.sin(wd * t))
+    : 1 - Math.exp(-w * t) * (1 + w * t);
+};
+const M3 = {spatial: m3spring(.8), bouncy: m3spring(.6), effects: m3spring(1)};
 function show(v) { document.querySelectorAll(".view").forEach(x => x.classList.toggle("on", x.id === v)); }
 document.querySelector(".ctrl").onclick = e => {
   const b = e.target.closest("button[data-cmd]"); if (b) api("api/cmd", {cmd: b.dataset.cmd});
@@ -657,17 +744,17 @@ function RRMap(el, btn) {
   btn.onclick = () => { follow = true; btn.classList.remove("on"); };
   const set = (id, pts) => { if (ready && m.getSource(id)) m.getSource(id).setData(line(pts)); };
   // heading up / chase: the map turns with the car and the car sits low on the screen, so more road shows ahead
-  const camera = (lat, lon, hd, dur) => {
+  const camera = (lat, lon, hd, dur, easing) => {
     const h = el.clientHeight || 600;
     const turn = mapView !== "north";
     m.easeTo({center: [lon, lat], bearing: turn ? (hd || 0) : 0, pitch: mapView === "chase" ? 60 : 0,
       padding: turn ? {top: h * 0.38, bottom: 0, left: 0, right: 0} : {top: 0, bottom: 0, left: 0, right: 0},
-      duration: dur});
+      duration: dur, ...(easing ? {easing} : {})});
   };
   const obj = {
     map: m,
     replace() { placed = false; },          // jump (not glide) to the car in the new map
-    applyView() { labels(); follow = true; btn.classList.remove("on"); if (lastPos) camera(...lastPos, 600); },
+    applyView() { labels(); follow = true; btn.classList.remove("on"); if (lastPos) camera(...lastPos, 700, M3.spatial); },
     async applyStyle() {
       labels(); ready = false;
       if (mapFlat) {
@@ -726,12 +813,12 @@ function RRMap(el, btn) {
         pts.forEach(p => b.extend([p[1], p[0]]));
         if (lastPos) b.extend([lastPos[1], lastPos[0]]);
         const h = el.clientHeight || 600, w = el.clientWidth || 800;
-        m.fitBounds(b, {padding: {top: h * .2, bottom: h * .12, left: w * .1, right: w * .1}, pitch: 0, bearing: 0, duration: 1600, maxZoom: 16.5});
+        m.fitBounds(b, {padding: {top: h * .2, bottom: h * .12, left: w * .1, right: w * .1}, pitch: 0, bearing: 0, duration: 1600, maxZoom: 16.5, easing: M3.spatial});
         emg.drawn = 0; paintRoute();
         const start = Date.now() + 700, dur = 1800;
         const draw = () => {
           const f = Math.min(1, Math.max(0, (Date.now() - start) / dur));
-          emg.drawn = f < 1 ? 1 - Math.pow(1 - f, 3) : 1; paintRoute();
+          emg.drawn = Math.min(1, M3.spatial(f)); paintRoute();
           if (f < 1 && emg.on) requestAnimationFrame(draw);
         };
         requestAnimationFrame(draw);
@@ -740,7 +827,7 @@ function RRMap(el, btn) {
           if (lastPos) m.flyTo({center: [lastPos[1], lastPos[0]], zoom: mapView === "chase" ? 17 : 16,
             bearing: mapView !== "north" ? (lastPos[2] || 0) : 0, pitch: mapView === "chase" ? 60 : 0,
             padding: mapView !== "north" ? {top: h * 0.38, bottom: 0, left: 0, right: 0} : {top: 0, bottom: 0, left: 0, right: 0},
-            duration: 2000, curve: 1.6});
+            duration: 2000, curve: 1.6, easing: M3.spatial});
           setTimeout(() => { cine = false; }, 2100);
         }, 4300);
       };
@@ -1090,7 +1177,7 @@ function renderRides(r, g) {
     side = `<div class="card" style="background:var(--panel2);text-align:center">
       <div style="display:flex;justify-content:center">${avatar(L.avatar, 64)}</div>
       <div class="muted">${esc(L.name)} → ${esc(L.dest)}</div>
-      <div class="stars">${"★".repeat(L.stars)}<span style="color:#3a4060">${"★".repeat(5 - L.stars)}</span></div>
+      <div class="stars">${"★".repeat(L.stars)}<span style="color:var(--md-outline-variant)">${"★".repeat(5 - L.stars)}</span></div>
       <div class="fare" style="font-size:40px">${money(L.pay)}</div>
       <div class="muted">fare ${money(L.fare)}${L.tip ? " + tip " + money(L.tip) : ""}</div>
       <div style="font-size:18px;margin-top:8px">“${esc(L.comment || "")}”</div>
@@ -1234,6 +1321,61 @@ $("vRiders").onchange = e => { voiceCfg.riders = e.target.checked; savePref("rrS
 $("vVoice").onchange = e => { voiceCfg.voice = e.target.value; savePref("rrVoice", e.target.value); };
 $("vTest").onclick = () => { sayNow({text: "Next stop: Baseline Station.", kind: "stop"});
   setTimeout(() => sayNow({text: "Hi! Thanks for picking me up.", kind: "rider", who: "Test rider"}), 3500); };
+
+// ---------- M3E tab indicators ----------
+// Every .toggle / .modes row gets a pill behind its selected button. Whatever code marks a button "on", the pill
+// follows: the edge on the side it's heading moves on a quick bouncy spring and the other edge on a slower one.
+// The direction is also handed to CSS (--dir) so the page that comes in slides from that side.
+function placeInd(box, animate) {
+  const on = box.querySelector(":scope > button.on");
+  let ind = box.querySelector(":scope > .m3-ind");
+  if (!on || !box.offsetParent) { if (ind && !on) ind.style.opacity = 0; return; }
+  if (!ind) { ind = document.createElement("i"); ind.className = "m3-ind"; box.prepend(ind); box.classList.add("has-ind"); animate = false; }
+  const btns = [...box.querySelectorAll(":scope > button")], idx = btns.indexOf(on);
+  if (box._idx != null && idx !== box._idx) document.documentElement.style.setProperty("--dir", idx > box._idx ? 1 : -1);
+  const right = box._idx == null || idx >= box._idx;
+  box._idx = idx;
+  const fast = "var(--d-spatial-fast) var(--m3-bouncy)", slow = "var(--d-spatial-slow) var(--m3-spatial)";
+  ind.style.transition = animate ? `left ${right ? slow : fast}, right ${right ? fast : slow}, top ${fast}, height ${fast}, opacity var(--d-effects) var(--m3-effects)` : "none";
+  ind.style.left = on.offsetLeft + "px"; ind.style.right = box.clientWidth - on.offsetLeft - on.offsetWidth + "px";
+  ind.style.top = on.offsetTop + "px"; ind.style.height = on.offsetHeight + "px"; ind.style.opacity = 1;
+}
+const indSize = new ResizeObserver(es => es.forEach(e => placeInd(e.target, false)));   // shown again or resized
+const indSetup = box => { if (!box._ind) { box._ind = true; indSize.observe(box); } placeInd(box, false); };
+document.querySelectorAll(".toggle, .modes").forEach(indSetup);
+new MutationObserver(muts => {
+  const moved = new Set();
+  for (const m of muts) {
+    if (m.type === "attributes") { const box = m.target.parentElement; if (box && box._ind && m.target.tagName === "BUTTON") moved.add(box); }
+    else for (const n of m.addedNodes) if (n.nodeType === 1 && !n.classList.contains("m3-ind"))
+      [...(n.matches(".toggle, .modes") ? [n] : []), ...n.querySelectorAll(".toggle, .modes")].forEach(indSetup);
+  }
+  moved.forEach(b => placeInd(b, true));
+}).observe(document.body, {subtree: true, childList: true, attributes: true, attributeFilter: ["class"]});
+
+// ---------- colours from the device ----------
+// The tablet's own accent colour when its browser exposes it (CSS AccentColor), otherwise the phone's wallpaper
+// colour sent by the Android Auto app; the built-in scheme stays when neither is known. Checked every minute, so a
+// new wallpaper comes through without a reload.
+let themeSeed = null;
+function deviceAccent() {
+  if (!window.CSS || !CSS.supports("color", "AccentColor")) return null;
+  const probe = document.createElement("i"); probe.style.color = "AccentColor"; document.body.appendChild(probe);
+  const m = getComputedStyle(probe).color.match(/\d+/g); probe.remove();
+  const hex = m ? "#" + m.slice(0, 3).map(v => (+v).toString(16).padStart(2, "0")).join("") : null;
+  return hex === "#0075ff" ? null : hex;          // Chromium's built-in blue: the browser doesn't know the device's colour
+}
+async function applyTheme() {
+  let seed = new URLSearchParams(location.search).get("seed");          // ?seed=3b6ea5 to try a colour
+  seed = seed ? "#" + seed.replace("#", "") : deviceAccent();
+  if (!seed) try { seed = (await api("api/theme")).seed; } catch {}
+  if (!seed || seed === themeSeed || !window.M3Color) return;
+  themeSeed = seed;
+  const vars = M3Color.scheme(seed), root = document.documentElement.style;
+  for (const k in vars) root.setProperty(k, vars[k]);
+  document.querySelector('meta[name="theme-color"]').content = vars["--md-surface"];
+}
+applyTheme(); setInterval(applyTheme, 60000);
 
 // ---------- #demo-emergency: a made-up emergency pickup in downtown Ottawa, to see the map change ----------
 function demoEmergency() {

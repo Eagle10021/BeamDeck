@@ -217,7 +217,7 @@ class NavScreen(ctx: CarContext, private val renderer: MapRenderer) : Screen(ctx
             .setMapActionStrip(ActionStrip.Builder().addAction(Action.Builder()
                 .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, R.drawable.m_straight)).build())
                 .setOnClickListener { renderer.recenter() }.build()).build())
-            .setBackgroundColor(CarColor.createCustom(0xFF141828.toInt(), 0xFF141828.toInt()))
+            .setBackgroundColor(DeviceColors.primaryContainer(carContext).let { CarColor.createCustom(it, it) })   // the turn card, in the phone's colours
         val route = HelperClient.route
         val step = if (navigating && route != null) Nav.nextStep(route, lastAlong) else null
         if (step != null) {

@@ -10,8 +10,8 @@ android {
         applicationId = "io.github.eagle10021.realroutes"
         minSdk = 31
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
         // phones only (MapLibre's native code is large; x86 emulators can add "x86_64")
         ndk { abiFilters += listOf("arm64-v8a") }
     }

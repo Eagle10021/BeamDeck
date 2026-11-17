@@ -506,6 +506,14 @@ class Helper:
         self.pa, self._pa_id = [], 0                        # announcements for the tablet to speak
         self.stock, self._stock_key = None, None            # a regular map's own bus lines
         self._page = (0, "")                                # console.html mtime, version hash
+        # Material You seed colours per device: "phone" is sent by the Android Auto app on start, "tablet" by
+        # tools/tablet_colours.sh (Chrome on Android doesn't give pages the system palette). The console builds its
+        # M3 scheme from the tablet's colour, else the phone's.
+        self._theme_file = os.path.join(data_root, "theme.json")
+        try:
+            self.theme = {k: v for k, v in json.load(open(self._theme_file)).items() if k in ("phone", "tablet")}
+        except Exception:
+            self.theme = {}
         threading.Thread(target=self.game_loop, daemon=True).start()
 
     def announce(self, text, kind="pa", who=None):
@@ -848,7 +856,8 @@ class Helper:
         if method == "GET":
             static = {"/": ("console.html", "text/html; charset=utf-8"), "/index.html": ("console.html", "text/html; charset=utf-8"),
                       "/manifest.json": ("manifest.json", "application/manifest+json"), "/sw.js": ("sw.js", "text/javascript"),
-                      "/icon.svg": ("icon.svg", "image/svg+xml"), "/icon-512.png": ("icon-512.png", "image/png")}
+                      "/icon.svg": ("icon.svg", "image/svg+xml"), "/icon-512.png": ("icon-512.png", "image/png"),
+                      "/m3color.js": ("m3color.js", "text/javascript")}
             if path in static:
                 f, ctype = static[path]
                 return 200, open(os.path.join(HERE, f), "rb").read(), ctype
@@ -860,11 +869,23 @@ class Helper:
             if path == "/api/trips" and self.routes_data():
                 d = date.today() + timedelta(days=int(qs.get("day", 0)))
                 return js({"date": d.isoformat(), "trips": self.routes_data().trips(qs["pattern"], d)})
+            if path == "/api/theme":
+                return js({"seed": self.theme.get("tablet") or self.theme.get("phone"), **self.theme})
             if path == "/api/version":
                 return js({"page": self.page_version()})
         elif method == "POST":
             if path == "/api/start" and self.routes_data():
                 self.start(body["pattern"], body.get("trip"), bool(body.get("live")), body.get("go", True))
+                return js({"ok": True})
+            if path == "/api/theme":
+                seed = str(body.get("seed") or "")
+                if not re.fullmatch(r"#[0-9a-fA-F]{6}", seed):
+                    return js({"ok": False, "error": "seed must be #rrggbb"})
+                dev = "tablet" if body.get("device") == "tablet" else "phone"
+                if seed.lower() != self.theme.get(dev):
+                    self.theme[dev] = seed.lower()
+                    with open(self._theme_file, "w") as f:
+                        json.dump(self.theme, f)
                 return js({"ok": True})
             if path == "/api/cmd":
                 self.command(body.get("cmd"))

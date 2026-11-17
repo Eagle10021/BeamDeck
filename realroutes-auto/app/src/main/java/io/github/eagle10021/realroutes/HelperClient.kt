@@ -74,6 +74,7 @@ object HelperClient {
         users++
         if (exec != null) return
         val app = ctx.applicationContext
+        post(app, "/api/theme", JSONObject().put("seed", DeviceColors.seedHex(app)))   // the tablet can match the phone's colours
         exec = Executors.newSingleThreadScheduledExecutor().also {
             it.scheduleWithFixedDelay({ poll(app) }, 0, 500, TimeUnit.MILLISECONDS)
         }
