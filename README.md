@@ -255,6 +255,18 @@ Check it from a player's PC: opening `http://<server-address>:47140/players` in 
 
 ## Real Routes Setup
 
+### What Goes Where
+
+| Device | What | From |
+| :--- | :--- | :--- |
+| PC | **BeamDeck** (helper, window and game mod) | This repository; see [Setup](#setup) |
+| PC, optional | **BeamNG.Earth**, for real streets and real bus routes. Without it, Rides works on any regular map | [TecnaGamer/BeamNG.Earth](https://github.com/TecnaGamer/BeamNG.Earth) (its own app and mod; follow its instructions) |
+| Tablet or any second screen | **The console**: nothing to install, it is a web page served by BeamDeck | See [The Tablet Console](#the-tablet-console) |
+| Phone, optional | **Real Routes for Android Auto**: the map and directions on the car's dash | `RealRoutes-Auto.apk` on this repository's [Releases](../../releases) page, or built from `realroutes-auto/` |
+| PC and phone, optional | **BeamNG.Earth Live GPS**: the phone's location follows the car on BeamNG.Earth | [Leopri2008/BeamNG.Earth-LiveGPS](https://github.com/Leopri2008/BeamNG.Earth-LiveGPS) (a PC script and a phone app) |
+
+BeamNG.Earth and Live GPS are separate projects by other authors with their own licences; they are not included here and are downloaded from their own pages.
+
 BeamDeck runs the Real Routes helper itself; the game side is part of the BeamDeck mod. The first time the console opens it offers to download and prepare the transit feed (set another feed with `routes_gtfs` and `routes_agency` in `config.json`).
 
 ### The Tablet Console
@@ -281,12 +293,12 @@ The helper answers private and Tailscale addresses only. In Chrome on the tablet
 
 `realroutes-auto/` is an Android app (Android 12 or newer) that puts the Real Routes map on Android Auto: the car's position, the route, pickup and drop-off pins and turn-by-turn steps, light with the headlights off and dark with them on.
 
-1. Build and install it: `cd realroutes-auto && ./gradlew installDebug` with the phone connected by USB (needs the Android SDK).
+1. Install it: download `RealRoutes-Auto.apk` from the [Releases](../../releases) page onto the phone and open it (allow the browser or file manager to install apps when asked). To build it instead: `cd realroutes-auto && ./gradlew installDebug` with the phone connected by USB (needs the Android SDK).
 2. Open **Real Routes** on the phone and enter the console's address (the same one the tablet uses).
 3. In **Android Auto settings**, tap **Version** ten times, then **⋮ → Developer settings → Unknown sources**, so Android Auto shows apps that didn't come from the Play Store.
 4. Start Android Auto (in BeamDeck: **Car → Android Auto**) and open **Real Routes** from its app list.
 
-On BeamNG.Earth, the game's position can also be fed to the phone as its location with BeamNG.Earth's **Live GPS** add-on (a separate download, not part of BeamDeck); **Settings → Live GPS** in the BeamDeck window starts and stops its script.
+On BeamNG.Earth, the game's position can also be fed to the phone as its location with the [**Live GPS**](https://github.com/Leopri2008/BeamNG.Earth-LiveGPS) add-on: install its phone app, download its PC script, give the script's path under **Settings → Live GPS** in the BeamDeck window, and turn **Live GPS** on there; BeamDeck then runs the script.
 
 ### Riders' Pictures and Models
 
