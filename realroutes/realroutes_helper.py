@@ -68,6 +68,85 @@ class Data:
                 for t in p["trips"] if t[1] in svc]
 
 
+class StockData:
+    """A regular BeamNG map's own bus lines (levels/<map>/buslines), as the mod exported them: the same
+    interface as Data, with a timetable made up from the route's length (a bus every 15 minutes)."""
+    SPEED = 7.5        # m/s average between stops (about 27 km/h)
+    DWELL = 20         # s at each stop
+    HEADWAY = 900      # s between trips
+
+    def __init__(self, path):
+        raw = json.load(open(path))
+        self.level = raw.get("level") or ""
+        self._routes, groups = {}, {}
+        for r in raw.get("routes", []):
+            stops = [{"id": st["id"], "code": "", "name": st["name"], "lat": st["lat"], "lon": st["lon"]}
+                     for st in r.get("stops", [])]
+            if len(stops) < 2:
+                continue
+            rid = str(r["routeID"]).replace("-", "_") or "?"
+            var = str(r.get("variance") or len(groups.get(rid, [])))
+            shape = r.get("shape") or [[st["lat"], st["lon"]] for st in stops]
+            line = Line(shape, stops[0]["lat"], stops[0]["lon"])
+            along, lo = [], 0.0
+            for st in stops:
+                x, y = line.to_xy(st["lat"], st["lon"])
+                sv, _ = line.project(x, y, lo, lo + 5000)
+                along.append(sv)
+                lo = sv
+            arr, dep, t = [0], [0], 0
+            for k in range(1, len(stops)):
+                t += max(20, (along[k] - along[k - 1]) / self.SPEED)
+                arr.append(round(t))
+                if k < len(stops) - 1:
+                    t += self.DWELL
+                dep.append(round(t))
+            pid = f"{rid}-{var}"
+            trips = [[f"{pid}-{start}", "stock", start, 0] for start in range(6 * 3600, 24 * 3600, self.HEADWAY)]
+            color = (r.get("color") or "#2a6fdb").lstrip("#")[:6]
+            pat = {"id": pid, "direction": var, "headsign": r.get("direction") or stops[-1]["name"], "stops": stops,
+                   "shape": shape, "profiles": [{"arr": arr, "dep": dep}], "trips": trips}
+            groups.setdefault(rid, {"route": rid, "name": r.get("name") or "", "color": color,
+                                    "text": text_on(color), "patterns": []})["patterns"].append(pat)
+        for rid, g in groups.items():
+            self._routes[rid] = g
+        self.index = {"agency": "stock", "feed": {"feed_publisher_name": "BeamNG · " + pretty_level(self.level)},
+                      "level": self.level, "routes": [
+            {"route": g["route"], "name": g["name"], "color": g["color"], "text": g["text"], "directions": [
+                {"direction": p["direction"], "patterns": [{
+                    "id": p["id"], "headsign": p["headsign"], "stops": len(p["stops"]), "from": p["stops"][0]["name"],
+                    "to": p["stops"][-1]["name"], "trips": len(p["trips"]),
+                    "minutes": round(p["profiles"][0]["arr"][-1] / 60)}]} for p in g["patterns"]]}
+            for g in sorted(groups.values(), key=lambda g: (len(g["route"]), g["route"]))]}
+
+    def route(self, name):
+        return self._routes[name]
+
+    def pattern(self, pid):
+        r = self._routes[pid.rsplit("-", 1)[0]]
+        return r, next(p for p in r["patterns"] if p["id"] == pid)
+
+    def services_on(self, d):
+        return {"stock"}
+
+    def trips(self, pid, d):
+        r, p = self.pattern(pid)
+        return [{"trip": t[0], "start": t[2], "time": hhmm(t[2]), "profile": t[3]} for t in p["trips"]]
+
+
+def text_on(hex6):
+    """Black or white text, whichever reads better on the route colour."""
+    try:
+        r, g, b = (int(hex6[k:k + 2], 16) for k in (0, 2, 4))
+    except ValueError:
+        return "FFFFFF"
+    return "000000" if 0.299 * r + 0.587 * g + 0.114 * b > 160 else "FFFFFF"
+
+
+def pretty_level(lvl):
+    return (lvl or "").replace("_", " ").title().replace("Usa", "USA")
+
+
 # ---------- geometry (local metres round the pattern's first stop) ----------
 
 class Line:
@@ -176,6 +255,8 @@ class Shift:
         self.doors = False
         self.finished = None
         self.sim_t = None          # set by --sim: the simulated seconds since the start
+        self.announce = lambda text, kind="pa", who=None: None   # the helper's announcer (spoken on the tablet)
+        self.recorded = False
 
     def _dest(self, rng, i):
         if i >= self.n - 1:
@@ -244,6 +325,9 @@ class Shift:
                 if not self._result(i):
                     late = now - self.sched_arr[i]
                     self.results.append({"i": i, "arr": now, "late_arr": late})
+                    # the outside speaker, like a real bus: route and destination for the people getting on
+                    if self.waiting[i] or i == 0:
+                        self.announce(f"Route {self.route['route']}, {self.p['headsign']}", "route")
                 cmds.append({"cmd": "atStop", "trigger": f"rr_{i}"})
             elif ds < -PASSED_M:
                 # drove past it
@@ -308,8 +392,8 @@ class Shift:
         self.i += 1
         if self.i >= self.n or (self.i == self.n - 1 and self._result(self.n - 1)):
             return self._finish()
-        if self.i == self.n - 1:
-            pass
+        name = self.stops[self.i]["name"]
+        self.announce(f"Next stop: {name}." + (" This is the last stop." if self.i == self.n - 1 else ""), "stop")
         return [self.gps_cmd(), self.markers_cmd()]
 
     def _finish(self):
@@ -319,6 +403,7 @@ class Shift:
         self.onboard = []
         s = self.finished
         self.note("ok", f"Trip done: {s['on_time_pct']}% on time, comfort {s['comfort']}, score {s['score']}")
+        self.announce("End of the line. Thank you for riding.", "stop")
         return [{"cmd": "notify", "text": f"End of the line! Score {s['score']}"}, {"cmd": "markers", "stops": []},
                 {"cmd": "gpsClear"}]
 
@@ -417,8 +502,57 @@ class Helper:
         import rides, people
         self.people = people
         os.makedirs(data_root, exist_ok=True)
-        self.rides = rides.Rides(self.send, data_root)
+        self.rides = rides.Rides(self.send, data_root, announce=self.announce)
+        self.pa, self._pa_id = [], 0                        # announcements for the tablet to speak
+        self.stock, self._stock_key = None, None            # a regular map's own bus lines
+        self._page = (0, "")                                # console.html mtime, version hash
         threading.Thread(target=self.game_loop, daemon=True).start()
+
+    def announce(self, text, kind="pa", who=None):
+        """Something for the tablet to say out loud: "stop"/"route" in the bus's voice, "rider" in a rider's."""
+        self._pa_id += 1
+        self.pa = (self.pa + [{"id": self._pa_id, "t": round(time.time(), 1), "text": text, "kind": kind,
+                               "who": who}])[-8:]
+
+    def routes_data(self):
+        """The routes on offer: the map's own bus lines on a regular map, the transit agency's on BeamNG.Earth."""
+        return self.stock if self.flat else self.data
+
+    def _load_stock(self, path):
+        try:
+            key = (path, os.path.getmtime(path))
+        except OSError:
+            return
+        if key == self._stock_key:
+            return
+        self._stock_key = key
+        try:
+            self.stock = StockData(path)
+            log("stock bus lines:", self.stock.level, len(self.stock.index["routes"]), "routes")
+        except Exception as e:
+            log("stock bus lines failed:", e)
+            self.stock = None
+
+    def page_version(self):
+        f = os.path.join(HERE, "console.html")
+        mt = os.path.getmtime(f)
+        if mt != self._page[0]:
+            import hashlib
+            self._page = (mt, hashlib.sha1(open(f, "rb").read()).hexdigest()[:12])
+        return self._page[1]
+
+    def _record(self, sh, early=False):
+        """A finished (or ended) bus trip into the driver's history."""
+        if sh.recorded:
+            return
+        sh.recorded = True
+        sm = sh.finished or sh.summary()
+        if not sm.get("stops_served"):
+            return
+        self.rides.record_bus({"t": round(time.time()), "route": sh.route["route"], "headsign": sh.p["headsign"],
+                               "score": sm["score"], "on_time": sm["on_time_pct"], "comfort": sm["comfort"],
+                               "carried": sm["carried"] + len(sh.onboard), "stops": sm["stops_served"],
+                               "total": sh.n, "early": early, "map": self.level if self.flat else None})
 
     def _load(self):
         root = os.path.join(self.data_root, self.agency)
@@ -470,6 +604,8 @@ class Helper:
                     if self.shift:
                         self.send(self.shift.update(m["lat"], m["lon"], m.get("speed", 0), bool(m.get("doors")),
                                                     m.get("gx", 0), m.get("gy", 0)))
+                        if self.shift.finished:
+                            self._record(self.shift)
                     else:
                         self.rides.update(m)
                 elif m.get("type") == "places":
@@ -492,18 +628,26 @@ class Helper:
                     self.level = m.get("level")
                     if m.get("roads"):
                         self.roads_file = m["roads"]
+                    if m.get("buslines"):
+                        self._load_stock(m["buslines"])
+                    elif self.flat:
+                        self.stock = None
                     if self.shift and self.shift.state != "done":  # game restarted mid-shift: show it again
                         self.send([self.shift.line_cmd(), self.shift.gps_cmd(), self.shift.markers_cmd()])
                     elif self.sign["mode"] != "off":
                         self._sign_send()
 
     def start(self, pid, trip_id, live, go):
-        r, p = self.data.pattern(pid)
-        trips = self.data.trips(pid, date.today()) or [{"trip": t[0], "start": t[2], "profile": t[3]} for t in p["trips"]]
+        data = self.routes_data()
+        r, p = data.pattern(pid)
+        trips = data.trips(pid, date.today()) or [{"trip": t[0], "start": t[2], "profile": t[3]} for t in p["trips"]]
         trip = next((t for t in trips if t["trip"] == trip_id), None) or trips[0]
         with self.lock:
             self.rides.go_online(False)
+            if self.shift and self.shift.state != "done":
+                self._record(self.shift, early=True)
             self.shift = Shift(r, p, trip, live)
+            self.shift.announce = self.announce
             cmds = self.shift.start_cmds()
             if not go:
                 cmds = cmds[1:]
@@ -596,9 +740,10 @@ class Helper:
                      color=body.get("color") or "#555555",
                      stops=[str(x).strip()[:40] for x in body.get("stops", []) if str(x).strip()][:80])
         elif mode == "route":
-            if not self.data:
+            data = self.routes_data()
+            if not data:
                 return False, "The routes aren't downloaded yet"
-            r, p = self.data.pattern(body["pattern"])
+            r, p = data.pattern(body["pattern"])
             g.update(routeID=r["route"], direction=p["headsign"], color="#" + r["color"], pattern=p["id"],
                      stops=[st["name"] for st in p["stops"]])
         with self.lock:
@@ -630,7 +775,11 @@ class Helper:
                    "rides": self.rides.view(),
                    "sign": self.sign | {"next": self.sign["stops"][self.sign["idx"]] if self.sign["stops"] else None,
                                         "locked": self.shift_running()},
-                   "data": {"ready": self.data is not None, "bake": self.bake_state, "agency": self.agency}}
+                   "data": {"ready": self.routes_data() is not None, "bake": self.bake_state,
+                            "agency": "stock" if self.flat else self.agency,
+                            "key": f"stock:{self.stock.level}:{self._stock_key[1]}" if self.flat and self.stock
+                            else ("stock:none" if self.flat else self.agency)},
+                   "pa": self.pa, "page": self.page_version()}
         return out
 
     def command(self, c):
@@ -638,6 +787,8 @@ class Helper:
             if c in ("doors", "kneel", "hazards"):
                 self.send([{"cmd": c}])
             elif c == "end" and self.shift:
+                if self.shift.state != "done":
+                    self._record(self.shift, early=True)
                 self.send([{"cmd": "markers", "stops": []}, {"cmd": "gpsClear"},
                            {"cmd": "line", "routeID": "", "direction": "Not in Service", "routeColor": "#555555",
                             "tasklist": []}])
@@ -670,6 +821,8 @@ class Helper:
             return 404, b"no avatar", "text/plain"
         if method == "GET" and path == "/api/people":
             return js(self.rides.people_info())
+        if method == "GET" and path == "/api/days":
+            return js(self.rides.days())
         if method == "GET" and path == "/api/history":
             return js({"history": self.rides.stats.get("history", [])[:100]})
         if method == "GET" and path == "/api/seats":
@@ -702,12 +855,15 @@ class Helper:
             if path == "/api/state":
                 return js(self.state())
             if path == "/api/routes":
-                return js(self.data.index if self.data else {"routes": []})
-            if path == "/api/trips" and self.data:
+                data = self.routes_data()
+                return js(data.index if data else {"routes": [], "agency": "stock" if self.flat else self.agency})
+            if path == "/api/trips" and self.routes_data():
                 d = date.today() + timedelta(days=int(qs.get("day", 0)))
-                return js({"date": d.isoformat(), "trips": self.data.trips(qs["pattern"], d)})
+                return js({"date": d.isoformat(), "trips": self.routes_data().trips(qs["pattern"], d)})
+            if path == "/api/version":
+                return js({"page": self.page_version()})
         elif method == "POST":
-            if path == "/api/start" and self.data:
+            if path == "/api/start" and self.routes_data():
                 self.start(body["pattern"], body.get("trip"), bool(body.get("live")), body.get("go", True))
                 return js({"ok": True})
             if path == "/api/cmd":
@@ -725,7 +881,7 @@ class Helper:
                         self.rides.go_online(True)
                     elif act == "offline":
                         self.rides.go_online(False)
-                    elif act in ("accept", "decline", "cancel"):
+                    elif act in ("accept", "decline", "cancel", "dismiss"):
                         getattr(self.rides, act)()
                     elif act == "preview" and body.get("avatar"):
                         self.rides.preview(str(body["avatar"]))

@@ -98,8 +98,9 @@ Heavy bass physically moves the car: the doors flex in and out and lids buzz (ab
 
 A driving job inside BeamDeck, on **BeamNG.Earth** (real streets) or any regular map:
 
-* **Bus:** drive real transit routes from a GTFS feed (OC Transpo by default): stops, timetable, passengers getting on and off, stop requests, a score for timekeeping and comfort, and the bus's own destination signs.
-* **Rides:** a ride-share shift. Riders (alone or in groups of two or three) ask for trips, you pick them up and drop them off, and they rate the pickup time, the trip time, smoothness and safety. Fares, tips, a history and a driver profile are kept between sessions.
+* **Bus:** drive real transit routes from a GTFS feed (OC Transpo by default): stops, timetable, passengers getting on and off, stop requests, a score for timekeeping and comfort, and the bus's own destination signs. On regular maps that come with bus lines (West Coast USA, East Coast USA, Italy, Utah, Jungle Rock Island), the map's own lines are offered instead, so BeamNG.Earth isn't needed, with a timetable worked out from each line's length (a bus every 15 minutes).
+* **Announcements:** the tablet calls out the next stop, and the route and destination when people get on, like a real bus. Riders speak their lines out loud, each in their own voice.
+* **Rides:** a ride-share shift. Riders (alone or in groups of two or three) ask for trips, you pick them up and drop them off, and they rate the pickup time, the trip time, smoothness and safety. Some trips are long runs across town or airport runs, fares surge at rush hour and late at night, and now and then a rider changes their destination on the way. Emergency riders only care about getting there fast (a medical emergency to a hospital doesn't mind anything else), and when one gets in, the tablet and Android Auto maps switch to an emergency mode: a flash, a banner, the whole route drawn in red, red and blue light at the edges until the drop-off. Open the console with `#demo-emergency` at the end of its address to see it without driving. Going offline shows a summary of the shift; fares, tips, a history, a day-by-day record and a driver profile are kept between sessions.
 * **Riders:** 100 built-in people, plus anyone you add from the console with a name and a picture (friends, characters). The driver has a profile with an uploaded picture.
 * **Riders you can see:** people wait at the roadside as cards (and 3D models, if you make them), and sit in the car as its own seat occupants. Any seat can also be filled by hand, the driver's included.
 * **Tablet console:** a web page for a tablet or second screen: route picker, live map (heading-up or 3D chase view) with the route and destination, ride offers, history, profile, seats, and a music bar.
@@ -282,12 +283,15 @@ The helper answers private and Tailscale addresses only. In Chrome on the tablet
 
 | Part of the console | Does |
 | :--- | :--- |
-| **Bus** | Pick a route, direction and trip (own clock or real time), then drive: schedule deviation, next stop, stop request bell, doors and kneeling, stops list or map, and a summary at the end |
+| **Bus** | Pick a route, direction and trip (own clock or real time), then drive: schedule deviation, next stop, stop request bell, doors and kneeling, stops list or map, and a summary at the end. On a regular map the list shows that map's own bus lines |
 | **Rides → Drive** | Go online, accept or decline offers, the map with the route to the pickup or drop-off, and the rider's profile |
-| **Rides → History / Profile** | Past trips with ratings and comments; earnings, rating, and the driver's name and picture (upload one, or use one of your people) |
+| **Rides → History / Profile** | Past trips with ratings and comments; earnings, rating, the driver's name and picture (upload one, or use one of your people), and a day-by-day table of rides, earnings, time online and bus trips |
 | **Rides → People** | Add a rider with a name and a picture chosen on that device, remove one, and choose who asks for rides: everyone, only your own people, or only the built-in ones |
 | **Rides → Seats** | Put any character in any seat, the driver's seat included. The car reloads in place (about a second) when a seat changes, so do it while stopped |
 | **Music bar** (bottom of every view) | What is playing, volume, previous, play / pause, next, and the time. Controls BeamDeck's player, the app picked under App sound, or the phone's music through Android Auto |
+| **Announcements** (speech-bubble button in the music bar) | Turn stop and route announcements and riders' voices on or off, and pick the announcer's voice. They're spoken by the tablet (the browser's own speech), so the tablet's volume sets how loud they are; tap the page once after opening it, as browsers only speak after a touch |
+
+The console reloads itself when BeamDeck has a newer version of it, so a tablet that keeps it open picks up updates without a manual reload.
 
 ### The Android Auto App
 

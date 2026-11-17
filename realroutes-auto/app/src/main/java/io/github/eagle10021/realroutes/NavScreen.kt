@@ -108,6 +108,7 @@ class NavScreen(ctx: CarContext, private val renderer: MapRenderer) : Screen(ctx
             navigating = want
             try { if (want) nav.navigationStarted() else nav.navigationEnded() } catch (_: Exception) { }
         }
+        emergency(route)
         // a ride request: the car screen shows it like the tablet does
         val r = rides(); val req = r?.optJSONObject("req")
         if (r?.optString("state") == "offered" && req != null) {
@@ -117,13 +118,45 @@ class NavScreen(ctx: CarContext, private val renderer: MapRenderer) : Screen(ctx
         refresh()
     }
 
+    private var emgKey: String? = null
+    private var emgSince = 0L
+    private var cineDone = false
+
+    /** An emergency rider got in: emergency mode, and once the trip's route is in, the pull-back and draw-in. */
+    private fun emergency(route: Route?) {
+        val r = rides(); val q = r?.optJSONObject("req")
+        val e = q?.opt("emergency")
+        val on = q != null && r.optString("state") == "on_trip" && (e == true || e == "medical")
+        if (!on) {
+            if (emgKey != null) { emgKey = null; renderer.setEmergency(null) }
+            return
+        }
+        val d = q!!.optJSONObject("dest") ?: return
+        val key = q.optString("name") + q.optJSONObject("pickup")?.optString("name")
+        if (key != emgKey) {
+            emgKey = key; emgSince = SystemClock.elapsedRealtime(); cineDone = false
+            renderer.setEmergency(MapRenderer.Emergency(d.optString("name"), e == "medical"))
+        }
+        if (cineDone) return
+        val pts = route?.points ?: emptyList()
+        val end = pts.lastOrNull()
+        val fresh = end != null && kotlin.math.abs(end[0] - d.optDouble("lat")) + kotlin.math.abs(end[1] - d.optDouble("lon")) < 0.006
+        if (fresh || SystemClock.elapsedRealtime() - emgSince > 4000) {
+            cineDone = true
+            val g = game()
+            renderer.cinematic(if (fresh) pts else listOf(doubleArrayOf(g?.optDouble("lat") ?: d.optDouble("lat"),
+                g?.optDouble("lon") ?: d.optDouble("lon")), doubleArrayOf(d.optDouble("lat"), d.optDouble("lon"))))
+        }
+    }
+
     private fun pins(): List<MapRenderer.Pin> {
         val r = rides() ?: return emptyList()
         val q = r.optJSONObject("req") ?: return emptyList()
         val out = mutableListOf<MapRenderer.Pin>()
         val st = r.optString("state")
         if (st != "on_trip") q.optJSONObject("pickup")?.let { out.add(MapRenderer.Pin(it.optDouble("lat"), it.optDouble("lon"), "#4fd18b")) }
-        q.optJSONObject("dest")?.let { out.add(MapRenderer.Pin(it.optDouble("lat"), it.optDouble("lon"), "#f06ac0")) }
+        val medical = q.opt("emergency") == "medical"      // a hospital: a red pin
+        q.optJSONObject("dest")?.let { out.add(MapRenderer.Pin(it.optDouble("lat"), it.optDouble("lon"), if (medical) "#e8273b" else "#f06ac0")) }
         return out
     }
 

@@ -92,7 +92,7 @@ flat.inWorld = function() return true end
 flat.rebasing = function() return false end
 flat.earthVersion = function() return nil end
 flat.speedLimit = function() return nil end
-flat.teleport = function() return false, "not on BeamNG.Earth" end
+flat.teleport = function() return true end   -- onUpdate places the bus directly on a regular map
 flat.toGame = function(lat, lon, h) return lon * K_LON, lat * K_LAT, h or 0 end
 flat.pose = function()
   local v = player()
@@ -228,6 +228,85 @@ local function exportRoads()
   roadsFor = lvl
   roadsFile = FS:getFileRealPath(vpath)
   return roadsFile
+end
+
+-- the level's own bus lines (levels/<map>/buslines/*.buslines.json + the "busstops" triggers), the way the game's
+-- busRouteManager reads them, with the road path between the stops: written once per level, path sent in hello
+local busFor, busFile = nil, nil
+local function tr(s)
+  if type(s) ~= "string" or s == "" then return s end
+  if translateLanguage then
+    local ok, t = pcall(translateLanguage, s, s, true)
+    if ok and t then return t end
+  end
+  return s
+end
+local function exportBuslines()
+  local lvl = getCurrentLevelIdentifier and getCurrentLevelIdentifier()
+  if not lvl then return nil end
+  if busFor == lvl then return busFile end
+  local m = map and map.getMap and map.getMap()
+  if not (m and m.nodes and next(m.nodes)) then return nil end   -- the road graph isn't loaded yet
+  busFor, busFile = lvl, nil
+  local files = FS:findFiles("/levels/" .. lvl .. "/buslines/", "*.buslines.json", -1, true, false) or {}
+  if #files == 0 then return nil end
+  local stops = {}
+  local grp = scenetree.findObject("busstops")
+  if grp and grp.getCount then
+    for i = 0, grp:getCount() - 1 do
+      local t = grp:getObject(i)
+      if t and t:getClassName() == "BeamNGTrigger" then
+        t = Sim.upcast(t)
+        if t.type == "busstop" then
+          local id = t:getName()
+          stops[id] = {pos = vec3(t:getPosition()), name = tr(t.stopName) or id}
+        end
+      end
+    end
+  end
+  local routes = {}
+  for _, f in ipairs(files) do
+    local data = jsonReadFile(f)
+    if data and data.version == 1 then
+      for _, r in ipairs(data.routes or {}) do
+        local list, positions = {}, {}
+        for _, id in ipairs(r.tasklist or {}) do
+          local st = stops[id]
+          if st then
+            for _, wp in ipairs((r.navhelp or {})[id] or {}) do      -- the route's own hints on the way there
+              local n = m.nodes[wp]
+              if n then positions[#positions + 1] = vec3(n.pos) end
+            end
+            positions[#positions + 1] = st.pos
+            local la, lo = toFlat(st.pos)
+            list[#list + 1] = {id = id, name = st.name, lat = la, lon = lo}
+          end
+        end
+        if #list >= 2 then
+          local shape = {}
+          local ok, err = pcall(function()
+            local rp = require('/lua/ge/extensions/gameplay/route/route')()
+            rp:setupPathMulti(positions)
+            for _, p in ipairs(rp.path or {}) do
+              local la, lo = toFlat(p.pos)
+              shape[#shape + 1] = {la, lo}
+            end
+          end)
+          if not ok then log("W", "realroutes", "bus line path: " .. tostring(err)) end
+          if #shape < 2 then shape = {}; for _, st in ipairs(list) do shape[#shape + 1] = {st.lat, st.lon} end end
+          routes[#routes + 1] = {routeID = tostring(r.routeID or "?"), variance = tostring(r.variance or ""),
+                                 name = tr(r.name), direction = tr(r.direction), color = r.routeColor,
+                                 stops = list, shape = shape}
+        end
+      end
+    end
+  end
+  if #routes == 0 then return nil end
+  local vpath = "/beamdeck_media/realroutes/buslines.json"
+  jsonWriteFile(vpath, {level = lvl, routes = routes}, false)
+  busFile = FS:getFileRealPath(vpath)
+  log("I", "realroutes", string.format("%d bus lines on %s", #routes, lvl))
+  return busFile
 end
 
 local function api()
@@ -880,7 +959,12 @@ local function onUpdate(dtReal)
   local a = api()
   if pendingGoto and os.clockhp() >= pendingGoto.at then
     local g = pendingGoto
-    if g.stage == "teleport" and a then
+    if g.stage == "teleport" and a == flat then          -- a regular map: put the bus at the stop straight away
+      pendingGoto = nil
+      placeBus(g)
+      lineAgainAt = os.clockhp() + 1
+      for _, m in ipairs(markers) do m.pos = nil end
+    elseif g.stage == "teleport" and a then
       local ok, why = a.teleport(g.lat, g.lon, g.name)
       if ok == false then log("W", "realroutes", "teleport refused: " .. tostring(why)); pendingGoto = nil
       else g.stage = "wait"; g.at = os.clockhp() + 60 end   -- onBeamNGEarthTeleported moves it on
@@ -910,7 +994,7 @@ local function onUpdate(dtReal)
     local isFlat = a == flat
     send({type = "hello", earth = a and a.earthVersion and a.earthVersion() or nil, mapPort = mapPort(),
           flat = isFlat or nil, level = isFlat and getCurrentLevelIdentifier() or nil,
-          roads = isFlat and exportRoads() or nil})
+          roads = isFlat and exportRoads() or nil, buslines = isFlat and exportBuslines() or nil})
   end
   if not (a and a.ready and a.ready()) then return end
   local p = a.pose()
