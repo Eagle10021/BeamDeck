@@ -616,10 +616,15 @@ function RRMap(el, btn) {
       this._pinKey = key;
       pinMarkers.forEach(x => x.remove()); pinMarkers = [];
       for (const p of list) {
+        // the marker is exactly the dot's size (the map centres it on the place); the label hangs above the dot
         const el = document.createElement("div");
-        if (p.small) { const sz = p.next ? 16 : 10; el.className = "stopdot"; el.style.cssText = `width:${sz}px;height:${sz}px;background:${p.color}`; }
-        else el.innerHTML = `<div class="pin" style="background:${p.color}"></div>`;
-        if (p.label && (!p.small || p.next)) { const t = document.createElement("div"); t.className = "pinlabel"; t.textContent = p.label; el.style.position = "relative"; el.appendChild(t); }
+        const sz = p.small ? (p.next ? 16 : 10) : 22;
+        el.style.cssText = `width:${sz}px;height:${sz}px`;
+        const dot = document.createElement("div");
+        dot.className = p.small ? "stopdot" : "pin";
+        dot.style.cssText = `width:${sz}px;height:${sz}px;background:${p.color};box-sizing:border-box;position:relative`;
+        if (p.label && (!p.small || p.next)) { const t = document.createElement("div"); t.className = "pinlabel"; t.textContent = p.label; dot.appendChild(t); }
+        el.appendChild(dot);
         pinMarkers.push(new maplibregl.Marker({element: el}).setLngLat([p.lon, p.lat]).addTo(m));
       }
     },
@@ -631,10 +636,12 @@ function RRMap(el, btn) {
 const rMap = RRMap($("rMap"), $("rRecenter"));
 const bMap = RRMap($("bMap"), $("bRecenter"));
 let routeVer = null, shapeFor = null, busStops = [];
+let routeShown = false;                       // a route is drawn: its flag marks where the car is heading
 async function updateRoute(v) {
   if (v === routeVer) return;
   routeVer = v;
   const r = await api("api/route");
+  routeShown = (r.points || []).length > 1;
   [rMap, bMap].forEach(mp => mp && mp.route(r.points));
 }
 $("busView").onclick = e => {
@@ -911,9 +918,13 @@ async function tick() {
     if (g.connected) updateRoute(g.routeVersion);
     // rides: pickup / drop-off pins
     const q = st.rides && st.rides.req;
+    // The route's flag already marks the current target at the roadside, so a pin for the same place (at the
+    // place's centre, off the road) is left out: only the later drop-off is pinned on the way to the pickup, and
+    // the target itself when no route is drawn yet.
+    const toPickup = q && st.rides.state !== "on_trip";
     if (rMap) rMap.pins(q ? [
-      ...(st.rides.state !== "on_trip" ? [{lat: q.pickup.lat, lon: q.pickup.lon, color: "#4fd18b", label: "Pickup: " + q.pickup.name}] : []),
-      {lat: q.dest.lat, lon: q.dest.lon, color: "#f06ac0", label: "Drop-off: " + q.dest.name}] : []);
+      ...(toPickup && !routeShown ? [{lat: q.pickup.lat, lon: q.pickup.lon, color: "#4fd18b", label: "Pickup: " + q.pickup.name}] : []),
+      ...(toPickup || !routeShown ? [{lat: q.dest.lat, lon: q.dest.lon, color: "#f06ac0", label: "Drop-off: " + q.dest.name}] : [])] : []);
     // bus: the route's shape and its stops (needed ones bright, the next one labelled)
     const s = st.shift;
     if (bMap && s && s.state !== "done") {
