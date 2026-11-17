@@ -3,8 +3,8 @@
 
 - Serves the BeamDeck control window at http://127.0.0.1:47130/ (open it as a browser app window).
 - Streams YouTube etc. through yt-dlp (VP9/Opus DASH), or downloads + converts when a site can't stream.
-- Talks to the game over UDP (game listens on 47131, we listen on 47132): the game sends camera/car
-  info for the car-speaker audio effect; we send the car-screen state (on/off, file, position).
+- Talks to the game over UDP (game listens on 47131, the helper on 47132): the game sends camera/car
+  info for the car-speaker audio effect; the helper sends the car-screen state (on/off, file, position).
 - Car screens can't load anything from the network (BeamNG's UI filter), so a small video-only copy
   is written into the mod folder and the game loads it from its own file system.
 """
@@ -86,10 +86,17 @@ CONFIG_DEFAULT = {
     "music_folders": [],                # local music library
     "navidrome": {"url": "", "user": "", "password": ""},
     "browser": "",                      # empty = first Chromium-based browser found (for the launcher)
-    "aa_transport": "usb",              # "usb" (like a real car, no developer mode) or "adb" (head unit server)
+    "aa_transport": "usb",
+    "aa_fps": 20,                       # Android Auto's picture on the car screens: frames a second (5-30)              # "usb" (like a real car, no developer mode) or "adb" (head unit server)
     "mp_relay": "",                     # BeamMP shared music: the relay's address, e.g. ws://server:47140
     "mp_share": True,                   # send the car's music to the other players
     "mp_share_screen": True,            # show the car screen on this player's car in the other players' games
+    # Real Routes (drive real bus routes on BeamNG.Earth): the transit agency's GTFS feed; empty = OC Transpo
+    "routes_gtfs": "",
+    "routes_agency": "octranspo",       # folder name for the baked routes
+    # BeamNG.Earth Live GPS (a separate add-on by Leopri2008: its PC script feeds the "BNE Mock GPS" phone app):
+    # BeamDeck runs the script while this is on. script: its .py (empty = look in the usual places)
+    "livegps": {"enabled": False, "script": ""},
     # Windows only: app sound and Android Auto's sound go through a virtual cable (VB-CABLE); NirSoft's
     # SoundVolumeCommandLine (svcl.exe) points the chosen app at it
     "windows": {"svcl": "svcl.exe", "cable_out": "CABLE Input", "cable_in": "CABLE Output (VB-Audio Virtual Cable)"},
@@ -120,6 +127,8 @@ def load_config():
     cfg.update({k: v for k, v in c.items() if k in cfg})
     if isinstance(c.get("windows"), dict):
         cfg["windows"] = dict(CONFIG_DEFAULT["windows"], **c["windows"])
+    if isinstance(c.get("livegps"), dict):
+        cfg["livegps"] = dict(CONFIG_DEFAULT["livegps"], **c["livegps"])
     if not cfg["music_folders"]:
         music = os.path.normpath(os.path.expanduser("~/Music"))
         cfg["music_folders"] = [music] if os.path.isdir(music) else []
@@ -633,7 +642,8 @@ def start_capture():
     aa_kill("ffmpeg")
     # tint < 1 pulls green down (towards magenta), > 1 adds green
     eq = "eq=brightness={brightness}:contrast={contrast}:saturation={saturation}:gamma={gamma}:gamma_g={tint}".format(**look)
-    ff = subprocess.Popen(["ffmpeg", "-v", "error", *grab_args(AA_FPS),
+    fps = max(5, min(30, int(config.get("aa_fps") or AA_FPS)))
+    ff = subprocess.Popen(["ffmpeg", "-v", "error", *grab_args(fps),
                            "-vf", "scale=960:540," + eq, "-c:v", "mjpeg", "-q:v", "7", "-f", "image2pipe", "-"],
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     aa["procs"]["ffmpeg"] = ff
@@ -1185,9 +1195,11 @@ def on_ws_message(m, ws=None):
             np.update(title="", source="")
         broadcast({"type": "appsound", "key": appcap["key"]})
     elif t == "np":                      # what the window is playing (music library, Navidrome, a link)
+        np_win.clear()
+        np_win.update(title=m.get("title", ""), artist=m.get("artist", ""), album=m.get("album", ""),
+                      dur=float(m.get("dur") or 0), cover=m.get("cover", ""))
         if not appcap["key"]:
-            np.update(title=m.get("title", ""), artist=m.get("artist", ""), album=m.get("album", ""),
-                      dur=float(m.get("dur") or 0), cover=m.get("cover", ""), source="window")
+            np.update(np_win, source="window")
     elif t == "rescan":
         threading.Thread(target=lib_scan, daemon=True).start()
     elif t == "calibrate":
@@ -1455,13 +1467,127 @@ def cover_update(ref):
     game_send(b"C", b64)
 
 
+def media_ctl(cmd):
+    """Play / pause / next / previous / volume from the Real Routes tablet: the captured app's own player (MPRIS),
+    else the BeamDeck window (which passes them to Android Auto's music when it is the one playing), else Android
+    Auto directly when no window is open. Returns what took the command, or None."""
+    keys = {"playpause": "play-pause", "next": "next", "prev": "previous"}
+    if cmd in keys and appcap["key"] and np.get("source") == "app" and not WINDOWS:
+        try:
+            players = subprocess.run(["playerctl", "-l"], capture_output=True, text=True).stdout.split()
+            name = appcap["key"].lower().split("/")[-1]
+            pick = next((p for p in players if p.split(".")[0].lower() in name or name in p.lower()), None)
+            if pick:
+                subprocess.run(["playerctl", "-p", pick, keys[cmd]], capture_output=True, timeout=3)
+                return "app"
+        except Exception:
+            pass
+    if cmd in keys or cmd in ("vol_up", "vol_down"):
+        if clients:
+            broadcast({"type": "gamecmd", "cmd": cmd, "on": True})
+            return "window"
+        if cmd in keys and aa_key(cmd):
+            return "aa"
+    return None
+
+
+np_win = {}          # what the window last said it plays (restored when it plays again after the phone's music)
+_phone_cover = {}    # (title, artist) -> (cover reference, duration) from the music library or Navidrome
+
+
+def phone_now():
+    """What the phone plays through Android Auto: its active media session, read over adb (the phone is connected
+    for the head unit already). None without adb or a session. The phone gives no artwork this way."""
+    adb = find_adb()
+    if not adb:
+        return None
+    kw = {"capture_output": True, "text": True, "timeout": 4}
+    if WINDOWS:
+        kw["creationflags"] = 0x08000000
+    try:
+        devs = [l.split()[0] for l in subprocess.run([adb, "devices"], **kw).stdout.splitlines()[1:]
+                if l.strip().endswith("device")]
+        for dev in devs[:3]:
+            # the session reports the position as it was at its last change ("updated", on the phone's boot clock),
+            # so the phone's clock is read in the same call to work out where the song is now
+            out = subprocess.run([adb, "-s", dev, "shell", "dumpsys media_session; echo __UP__; cat /proc/uptime"],
+                                 **kw).stdout
+            out, _, up = out.partition("__UP__")
+            m = re.search(r"Media button session is ([\w.]+)/", out)
+            if not m:
+                continue
+            block = out[out.find("package=" + m.group(1)):]
+            st = re.search(r"state=PlaybackState \{state=\w*\((\d+)\), position=(\d+).*?updated=(\d+)", block)
+            md = re.search(r"metadata: size=\d+, description=(.*)", block)
+            if not st or not md:
+                continue
+            parts = md.group(1).strip().split(", ")
+            title = parts[0]
+            sub = ", ".join(parts[1:-1]) if len(parts) > 2 else (parts[1] if len(parts) > 1 else "")
+            artist, _, album = sub.partition(" - ")
+            if title in ("null", ""):
+                continue
+            pos, playing = int(st.group(2)) / 1000, st.group(1) == "3"
+            try:
+                since = float(up.split()[0]) - int(st.group(3)) / 1000
+                if playing and 0 < since < 6 * 3600:
+                    pos += since
+            except (ValueError, IndexError):
+                pass
+            return {"title": title, "artist": artist if artist != "null" else "", "album": album,
+                    "pos": pos, "paused": not playing, "at": time.time(), "source": "aa"}
+    except Exception:
+        pass
+    return None
+
+
+def phone_cover(title, artist):
+    """A cover (and length) for the phone's song, when the same song is in the music library or on Navidrome."""
+    k = (title.casefold(), artist.casefold())
+    if k in _phone_cover:
+        return _phone_cover[k]
+    found = ("", 0)
+    try:
+        for i, t in lib["tracks"].items():
+            if str(t.get("title", "")).casefold() == k[0] and (not k[1] or k[1] in str(t.get("artist", "")).casefold()
+                                                                 or str(t.get("artist", "")).casefold() in k[1]):
+                found = ("/lib/cover/" + i, float(t.get("dur") or 0))
+                break
+        if not found[0] and config["navidrome"].get("url"):
+            for sng in nd("search3", query=title, songCount=20, albumCount=0, artistCount=0) \
+                    .get("searchResult3", {}).get("song", []):
+                a = str(sng.get("artist", "")).casefold()
+                if str(sng.get("title", "")).casefold() == k[0] and (not k[1] or k[1] in a or a in k[1]):
+                    found = (f"/nd/cover/{sng.get('coverArt', sng['id'])}", float(sng.get("duration") or 0))
+                    break
+    except Exception:
+        pass
+    _phone_cover[k] = found
+    return found
+
+
 def np_loop():
+    n = 0
     while True:
+        n += 1
         try:
             if appcap["key"]:
                 m = mpris_now(appcap["key"])
                 if m:
                     np.update(m)
+            elif aa["state"] == "on" and not player["paused"] and np_win.get("title"):
+                if np.get("source") == "aa":            # the window plays again: its own song is back
+                    np.update(np_win, source="window")
+            elif aa["state"] == "on":
+                if n % 2 == 0:                          # the phone's own music, through Android Auto
+                    m = phone_now()
+                    if m:
+                        m["cover"], m["dur"] = phone_cover(m["title"], m["artist"])
+                        np.update(m)
+                    elif np.get("source") == "aa":
+                        np.update(title="", artist="", album="", cover="", source="")
+            elif np.get("source") == "aa":
+                np.update(title="", artist="", album="", cover="", source="")
             if np.get("cover") != np_cover["key"]:
                 threading.Thread(target=cover_update, args=(np.get("cover", ""),), daemon=True).start()
                 np_cover["key"] = np.get("cover")
@@ -1476,6 +1602,10 @@ def np_state():
         return None
     if np.get("source") == "app":
         pos, paused = np.get("pos", 0), np.get("paused", True)
+    elif np.get("source") == "aa":
+        pos, paused = np.get("pos", 0), np.get("paused", True)
+        if not paused:
+            pos += time.time() - np.get("at", time.time())
     else:
         pos, paused = player_pos(), player["paused"]
     return {"t": np["title"][:120], "a": np.get("artist", "")[:120], "al": np.get("album", "")[:120],
@@ -1669,6 +1799,7 @@ def config_public():
     c["navidrome"]["has_password"] = bool(c["navidrome"].pop("password", ""))
     c["detected_userfolder"] = USERFOLDER
     c["platform"] = "windows" if WINDOWS else "linux"
+    c["livegps_status"] = livegps_status()
     return c
 
 
@@ -1682,6 +1813,21 @@ def config_update(d):
         config["mp_share"] = bool(d["mp_share"])
     if "mp_share_screen" in d:
         config["mp_share_screen"] = bool(d["mp_share_screen"])
+    if "aa_fps" in d:
+        try:
+            fps = max(5, min(30, int(d["aa_fps"])))
+        except (TypeError, ValueError):
+            fps = config.get("aa_fps", 20)
+        if fps != config.get("aa_fps"):
+            config["aa_fps"] = fps
+            if aa["procs"].get("ffmpeg"):
+                start_capture()                          # the new rate takes hold now
+    if isinstance(d.get("livegps"), dict):
+        lg = d["livegps"]
+        if "enabled" in lg:
+            config["livegps"]["enabled"] = bool(lg["enabled"])
+        if "script" in lg:
+            config["livegps"]["script"] = os.path.expanduser(str(lg["script"]).strip().strip('"'))
     if "music_folders" in d:
         # strip quotes too: Explorer's "Copy as path" gives "D:\Music"
         config["music_folders"] = [os.path.expanduser(f.strip().strip('"').strip()) for f in d["music_folders"]
@@ -1696,6 +1842,184 @@ def config_update(d):
     if config["music_folders"] != folders_before:
         threading.Thread(target=lib_scan, daemon=True).start()
     return config_public()
+
+
+# ---------------------------------------------------------------- Live GPS (BeamNG.Earth add-on)
+# Its PC script reads BeamNG.Earth's companion feed and serves the car's position to the "BNE Mock GPS" phone app,
+# which makes the phone's location follow the car (for Real Routes on Android Auto, Google Maps...). BeamDeck starts
+# it while Settings > Live GPS is on and starts it again if it stops. BeamDeck never ships the script: the player
+# downloads it from its author's releases (BeamNG.Earth's Add-ons page lists it).
+livegps = {"proc": None, "script": None, "error": "", "started": 0, "fails": 0}
+LIVEGPS_PORT = 47700
+
+
+def livegps_find():
+    want = config["livegps"].get("script", "")
+    if want:
+        return want if os.path.isfile(want) else None
+    import glob
+    places = [os.path.join(_xdg("XDG_DATA_HOME", "~/.local/share"), "bne-livegps"), os.path.join(DATA_DIR, "livegps"),
+              os.path.expanduser("~/Downloads")]
+    found = []
+    for d in places:
+        found += glob.glob(os.path.join(d, "bne_live_coords*.py")) + glob.glob(os.path.join(d, "pc", "bne_live_coords*.py"))
+    return max(found, key=os.path.getmtime) if found else None
+
+
+def livegps_phone_address():
+    """The address the phone app needs: the Tailscale address if there is one (works anywhere), else the LAN one."""
+    for probe in ("100.100.100.100", "192.168.0.1"):
+        try:
+            sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sk.connect((probe, 80))
+            ip = sk.getsockname()[0]
+            sk.close()
+            if probe.startswith("100.") and not ip.startswith("100."):
+                continue
+            return f"{ip}:{LIVEGPS_PORT}"
+        except OSError:
+            pass
+    return f"127.0.0.1:{LIVEGPS_PORT}"
+
+
+def livegps_status():
+    p = livegps["proc"]
+    running = bool(p and p.poll() is None)
+    return {"enabled": config["livegps"]["enabled"], "running": running, "script": livegps["script"] or livegps_find(),
+            "error": livegps["error"], "phone": livegps_phone_address() if running else None}
+
+
+def livegps_stop():
+    p = livegps["proc"]
+    if p and p.poll() is None:
+        p.terminate()
+        try:
+            p.wait(5)
+        except subprocess.TimeoutExpired:
+            p.kill()
+    livegps["proc"] = None
+
+
+def livegps_loop():
+    import sys
+    while True:
+        try:
+            want = config["livegps"]["enabled"]
+            p = livegps["proc"]
+            alive = bool(p and p.poll() is None)
+            if want and not alive:
+                if p is not None:                         # it stopped by itself
+                    livegps["fails"] += 1
+                    livegps["error"] = f"stopped (exit {p.returncode}); see {os.path.join(DATA_DIR, 'livegps.log')}"
+                    livegps["proc"] = None
+                wait = min(60, 5 * livegps["fails"])
+                if time.time() - livegps["started"] >= wait:
+                    script = livegps_find()
+                    livegps["script"] = script
+                    if not script:
+                        livegps["error"] = "Live GPS script not found: download bne_live_coords*.py (see Settings)"
+                    else:
+                        log = open(os.path.join(DATA_DIR, "livegps.log"), "w")
+                        livegps["proc"] = subprocess.Popen([sys.executable, script, "--feed"], cwd=os.path.dirname(script),
+                                                           stdout=subprocess.DEVNULL, stderr=log, stdin=subprocess.DEVNULL,
+                                                           **({"creationflags": 0x08000000} if WINDOWS else {}))
+                        livegps["started"] = time.time()
+                        livegps["error"] = ""
+            elif not want and alive:
+                livegps_stop()
+                livegps["fails"] = 0
+            elif alive and time.time() - livegps["started"] > 120:
+                livegps["fails"] = 0                      # ran fine for a while: forget earlier stops
+        except Exception as e:
+            livegps["error"] = str(e)
+        time.sleep(2)
+
+
+# ---------------------------------------------------------------- Real Routes
+# Bus routes from a real transit feed, driven on BeamNG.Earth. The console (tablet app and the window's Routes tab)
+# lives under /routes/; realroutes/realroutes_helper.py has the shift logic and its own UDP link to the game mod.
+ROUTES = None
+
+
+def routes_standees():
+    """Real Routes passengers' cut-out pictures (made by realroutes/make_avatars.py from the player's own art)
+    into <userfolder>/beamdeck_media/realroutes, where the game loads them."""
+    src = os.path.join(DATA_DIR, "realroutes", "avatars", "standees")
+    if not (USERFOLDER and os.path.isdir(src)):
+        return
+    dst = os.path.join(MEDIA, "realroutes")
+    os.makedirs(dst, exist_ok=True)
+    for f in os.listdir(src):
+        if f.endswith(".png"):
+            a, b = os.path.join(src, f), os.path.join(dst, f)
+            if not os.path.exists(b) or os.path.getmtime(b) < os.path.getmtime(a):
+                with open(a, "rb") as i, open(b, "wb") as o:
+                    o.write(i.read())
+    # 3D passengers (realroutes' Blender export): <data>/realroutes/models/<name>/{model.dae, materials.json, *.png}
+    msrc = os.path.join(DATA_DIR, "realroutes", "models")
+    if os.path.isdir(msrc):
+        for name in os.listdir(msrc):
+            d = os.path.join(msrc, name)
+            if not os.path.isdir(d):
+                continue
+            out = os.path.join(dst, "models", name)
+            os.makedirs(out, exist_ok=True)
+            for f in os.listdir(d):
+                a, b = os.path.join(d, f), os.path.join(out, f)
+                if not os.path.exists(b) or os.path.getmtime(b) < os.path.getmtime(a):
+                    with open(a, "rb") as i, open(b, "wb") as o:
+                        o.write(i.read())
+            routes_occupant(name, d)
+
+
+def routes_occupant(name, d):
+    """A 3D passenger as a seat occupant the car carries itself (like BeamNG's own dummy): the seated mesh
+    (vehicle.dae: rr_<name>_body / rr_<name>_head), its textures and a vehicle materials file, in
+    <userfolder>/vehicles/common/realroutes_people/<name>. realroutes.lua writes the matching occupant part (from
+    the game's own occupant_generic part) and puts it in a seat."""
+    if not os.path.exists(os.path.join(d, "vehicle.dae")):
+        return
+    out = os.path.join(USERFOLDER, "vehicles", "common", "realroutes_people", name)
+    os.makedirs(out, exist_ok=True)
+    for f in os.listdir(d):
+        if f in ("vehicle.dae", "seat.json") or f.endswith(".png"):
+            a, b = os.path.join(d, f), os.path.join(out, f)
+            if not os.path.exists(b) or os.path.getmtime(b) < os.path.getmtime(a):
+                with open(a, "rb") as i, open(b, "wb") as o:
+                    o.write(i.read())
+    try:
+        mats = json.load(open(os.path.join(d, "materials.json"))).get("materials", [])
+    except (OSError, ValueError):
+        return
+    vfs = "/vehicles/common/realroutes_people/" + name + "/"
+    out_mats = {}
+    for m in mats:
+        n = m["name"].replace("rr_", "rrv_", 1)
+        stage = {"baseColorFactor": m.get("color") or [1, 1, 1, 1]}
+        if m.get("tex"):
+            stage["baseColorMap"] = vfs + m["tex"]
+        out_mats[n] = {"name": n, "mapTo": n, "class": "Material", "version": 1.5, "doubleSided": True,
+                       "alphaTest": bool(m.get("alpha")), "alphaRef": 80, "Stages": [stage, {}, {}, {}]}
+    with open(os.path.join(out, "main.materials.json"), "w") as f:
+        json.dump(out_mats, f, indent=1)
+
+
+def routes_start():
+    global ROUTES
+    try:
+        routes_standees()
+    except OSError as e:
+        print("Real Routes: couldn't copy the passenger pictures:", e, flush=True)
+    try:
+        import sys
+        sys.path.insert(0, os.path.join(HERE, "realroutes"))
+        import realroutes_helper
+        ROUTES = realroutes_helper.Helper(os.path.join(DATA_DIR, "realroutes"), gtfs=config.get("routes_gtfs") or None,
+                                          agency=config.get("routes_agency") or "octranspo")
+        ROUTES.rides.on_people = routes_standees     # new or changed riders' pictures: into the game straight away
+        routes_standees()                            # (the helper has just written the built-in people's cards)
+    except Exception as e:
+        print("Real Routes is off:", e, flush=True)
 
 
 # ---------------------------------------------------------------- HTTP
@@ -1714,9 +2038,37 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
 
+    def routes(self, method, u, q, body):
+        if u.path == "/routes":                       # the console's links are relative: it needs the slash
+            self.send_response(301)
+            self.send_header("Location", "/routes/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if u.path == "/routes/api/music":             # the tablet's music bar: what is playing, and its buttons
+            if method == "POST":
+                return self.json({"ok": True, "by": media_ctl(str(body.get("cmd", "")))})
+            st = np_state() or {}
+            return self.json({"title": np.get("title", ""), "artist": np.get("artist", ""), "dur": np.get("dur", 0),
+                              "pos": st.get("p", 0), "paused": st.get("z", True), "source": np.get("source", ""),
+                              "aa": aa["state"] == "on", "cover": key_of(np["cover"]) if np.get("cover") else ""})
+        if u.path == "/routes/api/music/cover":
+            return self.image(cover_bytes(np.get("cover", "")))
+        if not ROUTES:
+            return self.json({"error": "Real Routes is off (see the helper's log)"}, 503)
+        code, data, ctype = ROUTES.handle(method, u.path[len("/routes"):], q, body)
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
+        if u.path == "/routes" or u.path.startswith("/routes/"):
+            return self.routes("GET", u, q, {})
 
         if self.headers.get("Upgrade", "").lower() == "websocket":
             key = self.headers.get("Sec-WebSocket-Key", "")
@@ -1842,6 +2194,8 @@ class H(BaseHTTPRequestHandler):
             return self.json({"apps": list_apps(), "selected": appcap["key"]})
         if u.path == "/config":
             return self.json(config_public())
+        if u.path == "/livegps":
+            return self.json(livegps_status())
         if u.path.startswith("/lib/"):
             if m := re.fullmatch(r"/lib/file/([0-9a-f]{12})", u.path):
                 t = lib["tracks"].get(m.group(1))
@@ -1882,6 +2236,8 @@ class H(BaseHTTPRequestHandler):
             return self.json({"error": "bad json"}, 400)
         if u.path == "/config":
             return self.json(config_update(body))
+        if u.path.startswith("/routes/"):
+            return self.routes("POST", u, {}, body)
         self.json({"error": "not found"}, 404)
 
     def image(self, data):
@@ -1988,5 +2344,9 @@ if __name__ == "__main__":
     threading.Thread(target=np_loop, daemon=True).start()
     if config["music_folders"]:
         threading.Thread(target=lib_scan, daemon=True).start()
+    routes_start()
+    threading.Thread(target=livegps_loop, daemon=True).start()
+    import atexit
+    atexit.register(livegps_stop)
     ThreadingHTTPServer.daemon_threads = True
     ThreadingHTTPServer((HOST, PORT), H).serve_forever()

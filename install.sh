@@ -23,6 +23,7 @@ mod="$user/mods/unpacked/beamdeck"
 
 for f in beamdeck-server.py beamdeck-launch.py beamdeck; do install -Dm755 "$here/$f" "$bin/$f"; done
 for f in beamdeck-ui.html beamdeck-icon.svg; do install -Dm644 "$here/$f" "$bin/$f"; done
+rm -rf "$bin/realroutes" && cp -r "$here/realroutes" "$bin/realroutes"   # Real Routes (bus routes on BeamNG.Earth)
 install -Dm644 "$here/beamdeck-icon.svg" "$data/icons/hicolor/scalable/apps/beamdeck.svg"
 mkdir -p "$data/applications"   # full path: desktop sessions often don't have ~/.local/bin on PATH
 sed "s|@BIN@|$bin|" "$here/beamdeck.desktop" > "$data/applications/beamdeck.desktop"

@@ -1,0 +1,8 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="56dp" android:height="56dp"
+    android:viewportWidth="56" android:viewportHeight="56">
+    <!-- the car: an orange ring with a white arrow pointing the way it drives (the tablet's and phone's marker) -->
+    <path android:fillColor="#40FF7A1A" android:strokeColor="#FFFF7A1A" android:strokeWidth="3"
+        android:pathData="M28,28m-24,0a24,24 0 1,0 48,0a24,24 0 1,0 -48,0" />
+    <path android:fillColor="#FFFFFFFF" android:strokeColor="#FF000000" android:strokeWidth="1"
+        android:pathData="M28,10 L40,40 L28,33 L16,40 Z" />
+</vector>

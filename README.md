@@ -19,6 +19,7 @@
   <a href="#setup"><b>Setup</b></a> ·
   <a href="#android-auto-setup"><b>Android Auto</b></a> ·
   <a href="#multiplayer-setup-beammp"><b>Multiplayer</b></a> ·
+  <a href="#real-routes-setup"><b>Real Routes</b></a> ·
   <a href="#game-controls"><b>Game Controls</b></a> ·
   <a href="#troubleshooting"><b>Troubleshooting</b></a>
 </p>
@@ -92,6 +93,19 @@ Heavy bass physically moves the car: the doors flex in and out and lids buzz (ab
 ### BeamDeck TV
 
 * The TV prop gets a **BeamDeck** configuration: it shows the same as the car screen, and when the camera is nearer the TV than the car, the sound comes from the TV, clear and positioned.
+
+### Real Routes
+
+A driving job inside BeamDeck, on **BeamNG.Earth** (real streets) or any regular map:
+
+* **Bus:** drive real transit routes from a GTFS feed (OC Transpo by default): stops, timetable, passengers getting on and off, stop requests, a score for timekeeping and comfort, and the bus's own destination signs.
+* **Rides:** a ride-share shift. Riders (alone or in groups of two or three) ask for trips, you pick them up and drop them off, and they rate the pickup time, the trip time, smoothness and safety. Fares, tips, a history and a driver profile are kept between sessions.
+* **Riders:** 100 built-in people, plus anyone you add from the console with a name and a picture (friends, characters). The driver has a profile with an uploaded picture.
+* **Riders you can see:** people wait at the roadside as cards (and 3D models, if you make them), and sit in the car as its own seat occupants. Any seat can also be filled by hand, the driver's included.
+* **Tablet console:** a web page for a tablet or second screen: route picker, live map (heading-up or 3D chase view) with the route and destination, ride offers, history, profile, seats, and a music bar.
+* **Android Auto app:** a small Android app that shows the same map, route and turn-by-turn directions on Android Auto, on the car's dash, in step with the tablet.
+
+See [Real Routes Setup](#real-routes-setup).
 
 ### Light on the Game
 
@@ -239,6 +253,49 @@ Check it from a player's PC: opening `http://<server-address>:47140/players` in 
 
 **For Windows players:** `./make-friend-zip.sh [output-folder] [ws://server-address:47140]` builds `BeamDeck-Windows.zip` (into `dist/` by default) with the Windows files, the mod, this README and a `RELAY.txt` with the relay address.
 
+## Real Routes Setup
+
+BeamDeck runs the Real Routes helper itself; the game side is part of the BeamDeck mod. The first time the console opens it offers to download and prepare the transit feed (set another feed with `routes_gtfs` and `routes_agency` in `config.json`).
+
+### The Tablet Console
+
+The console is a web page served by BeamDeck at `http://127.0.0.1:47130/routes/`. On the PC itself, open that address in a browser.
+
+BeamDeck only listens on the PC, so another device needs the page passed on to it. Any address that ends up at `/routes/` works; the page uses relative links, so nothing in it needs to be changed. Two ways:
+
+* **Tailscale** (PC and tablet in the same tailnet): `tailscale serve --bg --https=8447 http://127.0.0.1:47130/routes/`, then open `https://<pc-name>.<tailnet>.ts.net:8447` on the tablet. Only the console is passed on, not the rest of BeamDeck.
+* **Home network:** a reverse proxy on the PC (Caddy, nginx) from a LAN port to the same address, and the firewall opened for that port.
+
+The helper answers private and Tailscale addresses only. In Chrome on the tablet, **⋮ → Add to Home screen → Install** makes it a full-screen app that keeps the screen awake.
+
+| Part of the console | Does |
+| :--- | :--- |
+| **Bus** | Pick a route, direction and trip (own clock or real time), then drive: schedule deviation, next stop, stop request bell, doors and kneeling, stops list or map, and a summary at the end |
+| **Rides → Drive** | Go online, accept or decline offers, the map with the route to the pickup or drop-off, and the rider's profile |
+| **Rides → History / Profile** | Past trips with ratings and comments; earnings, rating, and the driver's name and picture (upload one, or use one of your people) |
+| **Rides → People** | Add a rider with a name and a picture chosen on that device, remove one, and choose who asks for rides: everyone, only your own people, or only the built-in ones |
+| **Rides → Seats** | Put any character in any seat, the driver's seat included. The car reloads in place (about a second) when a seat changes, so do it while stopped |
+| **Music bar** (bottom of every view) | What is playing, volume, previous, play / pause, next, and the time. Controls BeamDeck's player, the app picked under App sound, or the phone's music through Android Auto |
+
+### The Android Auto App
+
+`realroutes-auto/` is an Android app (Android 12 or newer) that puts the Real Routes map on Android Auto: the car's position, the route, pickup and drop-off pins and turn-by-turn steps, light with the headlights off and dark with them on.
+
+1. Build and install it: `cd realroutes-auto && ./gradlew installDebug` with the phone connected by USB (needs the Android SDK).
+2. Open **Real Routes** on the phone and enter the console's address (the same one the tablet uses).
+3. In **Android Auto settings**, tap **Version** ten times, then **⋮ → Developer settings → Unknown sources**, so Android Auto shows apps that didn't come from the Play Store.
+4. Start Android Auto (in BeamDeck: **Car → Android Auto**) and open **Real Routes** from its app list.
+
+On BeamNG.Earth, the game's position can also be fed to the phone as its location with BeamNG.Earth's **Live GPS** add-on (a separate download, not part of BeamDeck); **Settings → Live GPS** in the BeamDeck window starts and stops its script.
+
+### Riders' Pictures and Models
+
+BeamDeck comes with 100 generic riders, shown as plain pictograms; no pictures or models of real people or characters are included. Everything else is the player's own and stays in the player's data folder (`~/.local/share/beamdeck/realroutes` on Linux, `%LOCALAPPDATA%\BeamDeck\realroutes` on Windows), outside the repository.
+
+* **One person at a time:** **Rides → People** in the console. The picture is cropped on the device and saved as the person's round picture and roadside card. People with only a picture ride as BeamNG's own seat dummy.
+* **A folder of pictures:** `python3 realroutes/make_avatars.py "<folder>"`, where the folder holds one sub-folder of pictures per person. It finds the face, crops a round picture and a roadside card for each (crop and resize only), and keeps an `@artist` in the file name as the credit. Needs `opencv-python` below version 5 and the `lbpcascade_animeface.xml` detector in `~/.cache/realroutes/`.
+* **3D models (optional):** `realroutes/tools/` has the Blender scripts to pose a model you have the right to use (standing, and seated for the car) and export it for BeamNG: `rig.py` (poses with the model's own skeleton, or builds one), then `export_beamng.py`. The results go in `<data>/realroutes/models/<Name>/` and BeamDeck copies them into the game at start.
+
 ## Game Controls
 
 Bound in BeamNG under **Options → Controls** (search "BeamDeck"). All are unbound by default.
@@ -262,6 +319,9 @@ Bound in BeamNG under **Options → Controls** (search "BeamDeck"). All are unbo
 | Android Auto picture only fills part of the car screen, or the game map doesn't cover Maps (Windows) | Fixed for Windows display scaling (125 %, 150 %): update BeamDeck. |
 | Android Auto: phone doesn't connect | "Add new cars to Android Auto" on the phone; try another cable or port. |
 | Multiplayer: others can't hear or see each other | Same relay address for everyone, and **Test** says "Connected". |
+| Real Routes: the tablet shows "game not connected" | BeamNG must be running with the BeamDeck mod; after an update, press **Ctrl+L** in the game. |
+| Real Routes: a seated rider doesn't appear | Seats use BeamNG's seat occupants, so the car needs occupant seats (the official cars have them). The car reloads when a seat changes; if it didn't, pick the seat again. |
+| Real Routes: riders rate too harshly or too kindly | The limits are at the top of `realroutes/rides.py` (`JOLT`, `CRASH`, `SPEEDING_KMH`). |
 | The helper doesn't start (Windows) | `%LOCALAPPDATA%\BeamDeck\helper.log` and `launcher.log` show why. |
 
 ## How It Fits Together
@@ -273,6 +333,8 @@ Bound in BeamNG under **Options → Controls** (search "BeamDeck"). All are unbo
 | `beamdeck-launch.py` | Starts the helper if needed and opens the window in its own browser profile |
 | `mod/` | The BeamNG mod: game script, car-screen script and page, TV prop configuration, game controls |
 | `relay/` | The multiplayer relay (`beamdeck-relay.py`) and its compose file |
+| `realroutes/` | Real Routes: the helper (`realroutes_helper.py`, `rides.py`), the tablet console (`console.html`), the feed baker, and the tools for riders' pictures and models |
+| `realroutes-auto/` | The Real Routes app for Android Auto |
 | `install.sh`, `install.ps1` | Installers for Linux and Windows |
 | `make-beammp-zip.sh`, `make-friend-zip.sh` | Build the server's mod package and the Windows package for other players |
 

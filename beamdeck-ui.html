@@ -244,7 +244,7 @@
     /* Navigation */
     nav {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       gap: 3px;
       margin: 6px 12px 4px;
       padding: 3px;
@@ -1227,6 +1227,14 @@
       </svg>
       Car
     </button>
+    <button data-tab="bus">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+        stroke-linejoin="round">
+        <rect x="4" y="3" width="16" height="15" rx="3"></rect>
+        <path d="M4 11h16M8 21v-3M16 21v-3"></path>
+      </svg>
+      Bus
+    </button>
     <button data-tab="settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
         stroke-linejoin="round">
@@ -1392,6 +1400,7 @@
         </div>
       </div>
 
+
       <div class="card">
         <div class="card-head">
           <h2 class="card-title">
@@ -1463,6 +1472,50 @@
     </section>
 
     <!-- ======================= SETTINGS ======================= -->
+    <!-- ======================= BUS: signs on the city bus (Real Routes helper) ======================= -->
+    <section id="tab-bus">
+      <!-- Bus signs: the city bus's destination sign and next-stop screen (Real Routes helper) -->
+      <div class="card" id="busCard">
+        <div class="card-head">
+          <h2 class="card-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="3" width="16" height="15" rx="3"></rect>
+              <path d="M4 11h16M8 21v-3M16 21v-3"></path>
+            </svg>
+            Bus Signs
+          </h2>
+        </div>
+        <div class="hint" id="busStatus">For the city bus: its destination sign and the next-stop screen inside.</div>
+        <div class="toggles" id="busPresets" style="margin-top:8px">
+          <button data-preset="Not in Service">Not in Service</button>
+          <button data-preset="Charter">Charter</button>
+          <button data-preset="Special">Special</button>
+          <button data-preset="Out of Service">Out of Service</button>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <input id="busRoute" type="text" placeholder="Route" style="flex:0 0 72px">
+          <input id="busDest" type="text" placeholder="Destination">
+          <input id="busColor" type="color" value="#0057b8" title="Route colour" style="width:38px;height:32px;padding:0;border:0;background:none">
+        </div>
+        <textarea id="busStops" placeholder="Stops, one per line (optional): makes your own route for the next-stop screen" style="margin-top:8px;width:100%"></textarea>
+        <div class="row" style="margin-top:8px;justify-content:flex-end">
+          <button id="busApply" class="primary">Show on the bus</button>
+        </div>
+        <div class="hint" style="margin-top:12px">Or a real route:</div>
+        <div class="row" style="margin-top:6px">
+          <select id="busRealRoute" style="flex:0 0 110px"><option value="">Route…</option></select>
+          <select id="busRealPat" style="flex:1"><option value="">Direction…</option></select>
+          <button id="busRealApply">Use</button>
+        </div>
+        <div class="row" id="busStep" style="margin-top:12px;display:none">
+          <button id="busPrev" title="Previous stop">◀</button>
+          <span id="busNext" style="flex:1;text-align:center;font-size:13px"></span>
+          <button id="busNextBtn" title="Next stop">▶</button>
+        </div>
+      </div>
+    </section>
+
     <section id="tab-settings">
       <div class="card">
         <div class="card-head">
@@ -1553,6 +1606,11 @@
             <option value="adb">Head unit server (Android Auto developer mode; works over Wi-Fi adb)</option>
           </select>
         </label>
+        <label class="field">Android Auto on the car screens
+          <select id="cfAaFps">
+            <option value="10">10 fps (lightest)</option><option value="15">15 fps</option>
+            <option value="20">20 fps</option><option value="30">30 fps (smoothest)</option>
+          </select></label>
       </div>
 
       <div class="card">
@@ -1592,6 +1650,26 @@
         </div>
         <div class="hint">Game controls (Options &gt; Controls, search "BeamDeck"): push to talk, mute mic, volume.
           Voice settings apply immediately.</div>
+      </div>
+
+      <!-- Live GPS: BeamDeck runs the BeamNG.Earth Live GPS add-on's PC script (phone mock location) -->
+      <div class="card">
+        <div class="card-head">
+          <h2 class="card-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"></path>
+              <circle cx="12" cy="10" r="2.5"></circle>
+            </svg>
+            Live GPS (phone)
+          </h2>
+        </div>
+        <div class="toggles"><button id="tLiveGps" title="Run BeamNG.Earth Live GPS: your phone's location follows the car">Live GPS</button></div>
+        <div class="hint" id="lgStatus" style="margin-top:8px"></div>
+        <label class="field" style="margin-top:8px">Script (empty = find bne_live_coords*.py)
+          <input id="cfLgScript" type="text" placeholder="~/.local/share/bne-livegps/bne_live_coords v2.0.py"></label>
+        <div class="hint">The phone needs the add-on's "BNE Mock GPS" app set as its mock location app, pointed at the address above.
+          Get both from the add-on's page (BeamNG.Earth → Add-ons → Live GPS).</div>
       </div>
 
       <div class="card">
@@ -1735,11 +1813,49 @@
     function saveOpts() { try { localStorage.setItem("beamdeck.opts", JSON.stringify(opts)) } catch (e) { } }
 
     // ---------------- tabs ----------------
+    // ---------------- bus signs (Real Routes helper at /routes/) ----------------
+    let busRoutes = null, busTimer = null
+    const busApi = (p, body) => fetch("/routes/api/" + p, body ? { method: "POST", body: JSON.stringify(body) } : {}).then(r => r.json())
+    function busMsg(r) { if (r && r.error) $("busStatus").textContent = r.error }
+    function busSend(body) { busApi("sign", body).then(r => { busMsg(r); if (!r.error) busPoll() }) }
+    document.querySelectorAll("#busPresets button").forEach(b => b.onclick = () =>
+      busSend({ mode: b.dataset.preset === "Not in Service" ? "off" : "custom", routeID: "", direction: b.dataset.preset, color: "#555555" }))
+    $("busApply").onclick = () => busSend({ mode: "custom", routeID: $("busRoute").value.trim(), direction: $("busDest").value.trim(),
+      color: $("busColor").value, stops: $("busStops").value.split("\n") })
+    $("busRealRoute").onchange = () => {
+      const r = (busRoutes || []).find(x => x.route === $("busRealRoute").value)
+      $("busRealPat").innerHTML = '<option value="">Direction…</option>' + (r ? r.directions.flatMap(d => d.patterns).map(p =>
+        `<option value="${p.id}">→ ${p.headsign} (${p.from} → ${p.to}, ${p.stops} stops)</option>`).join("") : "")
+    }
+    $("busRealApply").onclick = () => { if ($("busRealPat").value) busSend({ mode: "route", pattern: $("busRealPat").value }) }
+    $("busPrev").onclick = () => busApi("sign/step", { delta: -1 }).then(r => { busMsg(r); busPoll() })
+    $("busNextBtn").onclick = () => busApi("sign/step", { delta: 1 }).then(r => { busMsg(r); busPoll() })
+    function busPoll() {
+      busApi("state").then(st => {
+        const g = st.sign || {}, locked = g.locked
+        $("busStatus").textContent = locked ? "A Real Routes shift is running on the tablet: it controls the signs."
+          : (g.mode === "off" ? "Sign: Not in Service" : `Sign: ${g.routeID ? g.routeID + " " : ""}${g.direction}`)
+            + (!st.game.connected ? " · game not connected (shown when it is)" : st.game.bus === false ? " · get in the city bus to see it" : "")
+        document.querySelectorAll("#busCard button, #busCard input, #busCard select, #busCard textarea").forEach(e => e.disabled = !!locked)
+        $("busStep").style.display = g.stops && g.stops.length && !locked ? "flex" : "none"
+        if (g.stops && g.stops.length) $("busNext").textContent = `Next stop: ${g.next} (${g.idx + 1}/${g.stops.length})`
+      }).catch(() => { $("busStatus").textContent = "The Real Routes helper isn't running." })
+    }
+    function busOpen() {
+      if (!busRoutes) busApi("routes").then(d => {
+        busRoutes = d.routes || []
+        $("busRealRoute").innerHTML = '<option value="">Route…</option>' + busRoutes.map(r => `<option>${r.route}</option>`).join("")
+      }).catch(() => {})
+      busPoll(); clearInterval(busTimer); busTimer = setInterval(busPoll, 2000)
+    }
+
     function showTab(t) {
+      if (!document.getElementById("tab-" + t)) t = "play"   // a remembered tab that no longer exists
       opts.tab = t; saveOpts()
       document.querySelectorAll("nav button").forEach(b => b.classList.toggle("sel", b.dataset.tab === t))
       document.querySelectorAll("main section").forEach(s => s.classList.toggle("sel", s.id === "tab-" + t))
       if (t === "settings") loadSettings()
+      if (t === "bus") busOpen(); else clearInterval(busTimer)
     }
     document.querySelectorAll("nav button").forEach(b => b.onclick = () => showTab(b.dataset.tab))
     showTab(new URLSearchParams(location.search).get("tab") || opts.tab)
@@ -2728,9 +2844,30 @@
         $("cfUser").value = c.beamng_userfolder || ""; $("cfUser").placeholder = c.detected_userfolder || "not found"
         $("cfBrowser").value = c.browser || ""
         $("cfAaT").value = c.aa_transport || "usb"
+        $("cfAaFps").value = String(c.aa_fps || 20)
         $("cfRelay").value = c.mp_relay || ""
+        $("cfLgScript").value = (c.livegps && c.livegps.script) || ""
+        lgShow(c.livegps_status)
       })
       libStatus()
+    }
+    // ---------------- Live GPS ----------------
+    let lgTimer = null
+    function lgShow(st) {
+      if (!st) return
+      $("tLiveGps").classList.toggle("on", !!st.enabled)
+      $("lgStatus").textContent = !st.enabled ? "Off"
+        : st.running ? `Running · phone app address: ${st.phone}`
+        : st.error || "Starting…"
+      clearTimeout(lgTimer)
+      if (st.enabled && document.getElementById("tab-settings").classList.contains("sel"))
+        lgTimer = setTimeout(() => getJSON("/livegps").then(lgShow), 3000)
+    }
+    $("tLiveGps").onclick = () => {
+      const on = !$("tLiveGps").classList.contains("on")
+      fetch("/config", { method: "POST", body: JSON.stringify({ livegps: { enabled: on } }) })
+        .then(r => r.json()).then(c => setTimeout(() => getJSON("/livegps").then(lgShow), 1500))
+      $("tLiveGps").classList.toggle("on", on); $("lgStatus").textContent = on ? "Starting…" : "Off"
     }
     function libStatus() {
       getJSON("/lib/status").then(s => {
@@ -2743,7 +2880,8 @@
         music_folders: $("cfFolders").value.split("\n"),
         navidrome: { url: $("cfNdUrl").value, user: $("cfNdUser").value, password: $("cfNdPass").value },
         beamng_userfolder: $("cfUser").value, browser: $("cfBrowser").value, aa_transport: $("cfAaT").value,
-        mp_relay: $("cfRelay").value,
+        mp_relay: $("cfRelay").value, aa_fps: +$("cfAaFps").value,
+        livegps: { script: $("cfLgScript").value },
       }
       return fetch("/config", { method: "POST", body: JSON.stringify(body) }).then(r => r.json())
     }

@@ -38,6 +38,7 @@ foreach ($f in "beamdeck-server.py", "beamdeck-ui.html", "beamdeck-icon.svg", "b
     Copy-Item (Join-Path $here $f) $app -Force
 }
 Copy-Item (Join-Path $here "mod\*") $mod -Recurse -Force
+Copy-Item (Join-Path $here "realroutes") $app -Recurse -Force   # Real Routes (bus routes on BeamNG.Earth)
 
 # Start menu shortcut: pythonw runs the launcher without a console window
 # Microsoft Store Python is skipped: its AppData virtualization hides %LOCALAPPDATA%\BeamDeck from it

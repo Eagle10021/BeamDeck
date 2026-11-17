@@ -16,6 +16,7 @@ tmp=$(mktemp -d); pkg="$tmp/BeamDeck"
 mkdir -p "$pkg"
 cp "$here/beamdeck-server.py" "$here/beamdeck-ui.html" "$here/beamdeck-icon.svg" "$here/beamdeck-launch.py" "$here/install.ps1" "$pkg/"
 cp -r "$here/mod" "$pkg/"
+cp -r "$here/realroutes" "$pkg/"
 if [ -f "$here/FRIEND-INSTALL.txt" ]; then
     sed "s|{{RELAY}}|$relay|" "$here/FRIEND-INSTALL.txt" | sed 's/$/\r/' > "$pkg/FRIEND-INSTALL.txt"   # Windows line endings
 else

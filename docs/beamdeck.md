@@ -153,6 +153,58 @@ The same helper, window and mod run on Windows, and the Linux-only pieces have W
 * Keep **yt-dlp** up to date (`yt-dlp -U`, or your package manager): an old one gets **403 Forbidden** from YouTube.
 * The Windows window is raised when BeamDeck is launched again (the running Edge otherwise opens new windows behind everything).
 
+## 6b. Real Routes
+
+A driving job on top of BeamDeck: real bus routes from a GTFS feed, and a ride-share shift ("Rides"). It runs on BeamNG.Earth (real streets) and on regular maps.
+
+```
+ Tablet console (web page)      Android Auto app            beamdeck-server.py                  BeamNG
+ ┌──────────────────────┐      ┌──────────────────┐  HTTP   ┌───────────────────────┐  UDP     ┌──────────────────────────┐
+ │ console.html         │◄────►│ realroutes-auto  │◄───────►│ /routes/* →           │ 47150 ►  │ GE extension "realroutes" │
+ │ MapLibre map, Rides, │ HTTP │ MapLibre on the  │         │ realroutes_helper.py  │ ◄ 47151  │  pose, route, places,     │
+ │ Bus, Seats, music    │      │ car's surface    │         │ rides.py (shift logic)│          │  riders, seats, GPS       │
+ └──────────────────────┘      └──────────────────┘         └───────────────────────┘          └──────────────────────────┘
+```
+
+**The helper** (`realroutes/realroutes_helper.py`, loaded by `beamdeck-server.py` and served under `/routes/`) holds all the logic; the game extension only reports and draws. Ten times a second the game sends the car's position, speed, g-forces, headlights and the speed limit; the helper answers with commands (set the GPS, show a message, place riders, fill seats).
+
+| Endpoint (under `/routes/`) | What |
+| :--- | :--- |
+| `api/state`, `api/pose` | Everything the console shows; the car's position (polled 10 times a second for the map) |
+| `api/route`, `api/roads`, `api/mapstyle` | The current GPS route with its turn steps; a regular map's own roads and a map style drawn from them |
+| `api/rides`, `api/profile` | Rides: go online or offline, accept, decline, cancel; the driver's profile |
+| `api/seats` | The car's seats and who sits in them; put a character in a seat |
+| `api/music`, `api/music/cover` | The music bar: what is playing, and play / pause / next / previous / volume |
+
+**Two kinds of map.** On BeamNG.Earth, positions are real latitudes and longitudes, places and routes come from its API, and the consoles draw OpenFreeMap's streets. On a regular map a small "flat" adapter stands in: a latitude and longitude are made up from the game's x and y, places come from the map's own points of interest, routes from BeamNG's route planner, and the consoles draw the level's own roads (sent once as `roads.json`).
+
+**The tablet console** (`realroutes/console.html`) is one page with relative links, so any address that reaches `/routes/` works: MapLibre GL (bundled) with heading-up and 3D chase views, the Bus and Rides modes, and a music bar that goes through the same media commands as the game's key bindings (BeamDeck's player, the app picked under App sound through MPRIS, or Android Auto's music).
+
+**The Android Auto app** (`realroutes-auto/`, `androidx.car.app` navigation template) draws MapLibre into a virtual display on the car's surface: the same route, pins and turn steps as the tablet, read from the same helper, light or dark by the car's headlights.
+
+**Rides** (`realroutes/rides.py`): offers with a rider (or a group of two or three), a pickup and a destination; states `online → offered → to_pickup → boarding → on_trip → done`. A trip's stars come from four parts: pickup time and trip time against the estimate (20 % over still counts as on time), smoothness (hard braking or cornering over about 0.6 g that lasts, the first two forgiven) and safety (20 km/h or more over the limit for more than 4 seconds; crashes).
+
+**People** (`realroutes/people.py`): 100 built-in riders with no picture files; their round picture and roadside card are a pictogram drawn in code and written as PNG with the standard library. The player's own riders are a square JPEG and a tall PNG card per person, made in the console (the browser crops the chosen picture on a canvas and sends both) or by `make_avatars.py`; they live in the data folder, never in the repository. `api/people` lists, adds and removes them and sets who asks for rides.
+
+**Riders in the world.** At the roadside they are `TSStatic` objects (a cut-out card or a 3D model). In the car they are the car's own **seat occupants**: BeamNG's dummy is the shared part `occupant_generic` (slot type `seat_occupant`), and the extension writes a copy of that part for each character (`occupant_generic_rr_<name>`, from the game's own file, so it follows game updates) with the character's seated mesh as two rigid props (body and head) on the seat's cushion and backrest nodes. Seating someone chooses that part for the seat's slot and reloads the car in place. The driver's head is hidden in the driver's own seat view.
+
+**Models.** `realroutes/tools/rig.py` poses a downloaded model in Blender (standing with arms down; seated with knees up and hands on the lap), with the model's own skeleton or one built from its proportions. `export_beamng.py` writes the files BeamNG needs: `model.dae` and `seated.dae` (roadside and non-seat-system cars), `vehicle.dae` (the occupant meshes, in the occupant part's frame: cushion at 0, forward −Y) and the materials. Blender 5 has no COLLADA exporter, so the script writes the files itself.
+
+| Port | What |
+| :--- | :--- |
+| `127.0.0.1:47150` UDP | Game listens: commands from the helper |
+| `127.0.0.1:47151` UDP | Helper listens: pose, route, places, seats |
+
+Things found building it:
+
+1. **A rider placed every frame trails the car.** A separate object set to the seat's position each frame (even in `onPreRender`) was drawn up to half a metre behind at speed. Only something the car draws itself stays put, hence the occupant parts.
+2. **`vehicle:getRotation()` does not follow the car's heading**; use `getDirectionVector()` and `getDirectionVectorUp()`.
+3. **Seat cameras moved:** `v.data.cameras.occupant[seatId]` (with `camNodeID`), no longer `camerasInternal`.
+4. **The seat system only counts parts named `occupant_generic…` as seats**, so a replacement occupant part must keep that prefix.
+5. **A long mesh as a flexbody on the occupant's nodes stretches** (the legs are far from the few torso nodes); rigid props keep their shape.
+6. **`TSStatic` shapes need the Torque node tree** `base00 > start01 > <mesh>_a<size>` to be drawn; vehicle meshes are plain named nodes.
+7. **`core_vehicle_partmgmt.setConfig`** is the exported name of the config merge (`mergeConfig` is local).
+
 ## 7. Gotchas Found Building It
 
 1. **Simple-menu app picker:** BeamNG 0.40's simplified UI hides UI apps with `"interactive": "required"` (the first, in-game version of BeamDeck didn't show).

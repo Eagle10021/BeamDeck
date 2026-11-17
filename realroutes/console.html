@@ -1,0 +1,993 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>Real Routes</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="maplibre/maplibre-gl.css">
+<script src="maplibre/maplibre-gl.js"></script>
+<link rel="icon" href="icon.svg">
+<meta name="theme-color" content="#070a14">
+<meta name="mobile-web-app-capable" content="yes">
+<style>
+  :root {
+    --bg: #070a14; --panel: #111628; --panel2: #171d34; --line: rgba(255,255,255,.08);
+    --text: #eef1fb; --muted: #9aa3c2; --dim: #5d6685;
+    --ok: #4fd18b; --late: #ffb547; --early: #6cb6ff; --bad: #ff5d6c; --accent: #e7a1c4;
+  }
+  * { box-sizing: border-box; margin: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
+    font: 16px/1.25 "Inter", "Noto Sans", system-ui, sans-serif; font-variant-numeric: tabular-nums; user-select: none; }
+  button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+  .view { display: none; height: calc(100% - 66px); padding: 14px 14px 10px; gap: 12px; }
+  .view.on { display: grid; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 14px 16px; min-height: 0; }
+  .badge { display: inline-grid; place-items: center; min-width: 54px; padding: 3px 10px; border-radius: 9px;
+    font-weight: 800; font-size: 20px; }
+  h1 { font-size: 22px; font-weight: 700; }
+  .muted { color: var(--muted); } .dim { color: var(--dim); }
+
+  /* ---------- picker ---------- */
+  #pick { grid-template-columns: 1.1fr 1fr 1fr; }
+  #pick .col { display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+  #pick .scroll { overflow-y: auto; flex: 1; min-height: 0; padding-right: 4px; }
+  #search { width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 12px;
+    color: var(--text); font: inherit; font-size: 20px; padding: 10px 14px; }
+  .routes { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; }
+  .routes button { padding: 12px 0; border-radius: 12px; font-weight: 800; font-size: 20px; }
+  .routes button.sel { outline: 3px solid var(--text); outline-offset: 2px; }
+  .pat { width: 100%; text-align: left; background: var(--panel2); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+  .pat.sel { outline: 2px solid var(--accent); }
+  .pat b { font-size: 17px; } .pat small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .trip { width: 100%; display: flex; justify-content: space-between; align-items: center; background: var(--panel2);
+    border-radius: 10px; padding: 10px 12px; margin-bottom: 6px; font-size: 18px; }
+  .trip.past { opacity: .4; } .trip.sel { outline: 2px solid var(--accent); }
+  .trip small { color: var(--muted); font-size: 13px; }
+  .toggle { display: flex; background: var(--panel2); border-radius: 12px; padding: 4px; gap: 4px; }
+  .toggle button { flex: 1; padding: 9px; border-radius: 9px; background: none; color: var(--muted); font-size: 15px; }
+  .toggle button.on { background: #2a3150; color: var(--text); }
+  .go { padding: 16px; border-radius: 14px; background: var(--ok); color: #04170d; font-weight: 800; font-size: 20px; }
+  .go:disabled { background: #2a3150; color: var(--dim); }
+  .hint { font-size: 13px; color: var(--muted); }
+
+  /* ---------- driving ---------- */
+  #drive { grid-template-columns: 1.25fr 1fr 210px; grid-template-rows: auto 1fr auto; }
+  .top { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; padding: 10px 16px; }
+  .top .head { font-size: 24px; font-weight: 700; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .top .clock { font-size: 30px; font-weight: 700; }
+  .conn { font-size: 13px; padding: 4px 10px; border-radius: 99px; background: var(--panel2); color: var(--muted); }
+  .conn.ok { color: var(--ok); } .conn.bad { color: var(--bad); }
+  .main { display: flex; flex-direction: column; gap: 12px; }
+  .dev { display: flex; align-items: baseline; gap: 12px; }
+  .dev .big { font-size: 64px; font-weight: 800; line-height: 1; letter-spacing: -2px; }
+  .dev .lbl { font-size: 22px; font-weight: 600; }
+  .ok { color: var(--ok); } .late { color: var(--late); } .early { color: var(--early); } .bad { color: var(--bad); }
+  .nextname { font-size: 34px; font-weight: 800; line-height: 1.1; }
+  .nextmeta { display: flex; gap: 16px; font-size: 18px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+  .bell { display: none; align-items: center; gap: 10px; background: rgba(255,93,108,.15); color: var(--bad);
+    border-radius: 12px; padding: 10px 14px; font-size: 22px; font-weight: 800; animation: blink 1s infinite; }
+  .bell.on { display: flex; }
+  .dwell { display: none; background: var(--panel2); border-radius: 12px; padding: 10px 14px; font-size: 19px; }
+  .dwell.on { display: block; }
+  @keyframes blink { 50% { opacity: .55; } }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: auto; }
+  .stat { background: var(--panel2); border-radius: 12px; padding: 8px 12px; }
+  .stat b { display: block; font-size: 26px; } .stat span { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .stops { list-style: none; padding: 0; display: grid; gap: 6px; overflow: hidden; }
+  .stops li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; background: var(--panel2); border-radius: 12px; padding: 9px 12px; }
+  .stops li.first { outline: 2px solid var(--accent); }
+  .stops .n { font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stops .t { font-size: 18px; font-weight: 700; text-align: right; }
+  .stops .m { font-size: 13px; color: var(--muted); grid-column: 1 / -1; }
+  .ctrl { display: flex; flex-direction: column; gap: 10px; }
+  .ctrl button { flex: 1; border-radius: 16px; background: var(--panel2); font-size: 19px; font-weight: 700;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 64px; }
+  .ctrl button.doors { flex: 2.2; font-size: 24px; background: #20305a; }
+  .ctrl button.doors.open { background: var(--late); color: #231400; }
+  .ctrl button:active { transform: scale(.97); }
+  .ctrl button.end { flex: .8; background: #3a1820; color: #ffb3bd; font-size: 15px; }
+  .ctrl svg { width: 30px; height: 30px; }
+  .log { grid-column: 1 / 3; display: flex; gap: 8px; overflow: hidden; padding: 10px 14px; font-size: 14px; }
+  .log span { white-space: nowrap; padding: 3px 10px; border-radius: 99px; background: var(--panel2); }
+  .log .bad { background: rgba(255,93,108,.14); } .log .warn { background: rgba(255,181,71,.14); color: var(--late); }
+  .comfort { height: 8px; border-radius: 4px; background: #23293f; overflow: hidden; margin-top: 4px; }
+  .comfort i { display: block; height: 100%; background: var(--ok); }
+  .summary { position: fixed; inset: 0; background: rgba(4,6,12,.85); display: none; place-items: center; }
+  .summary.on { display: grid; }
+  .summary .card { width: 560px; text-align: center; padding: 28px; }
+  .summary .score { font-size: 96px; font-weight: 800; }
+  .summary .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 18px 0; }
+  .offroute { display: none; color: var(--bad); font-weight: 700; } .offroute.on { display: inline; }
+
+  /* mode switch */
+  .modes { position: fixed; top: 22px; right: 26px; z-index: 5; display: flex; background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 12px; padding: 4px; gap: 4px; }
+  .modes button { padding: 8px 18px; border-radius: 9px; background: none; color: var(--muted); font-weight: 700; font-size: 15px; }
+  .modes button.on { background: #2a3150; color: var(--text); }
+  body.driving .modes { display: none; }
+
+  /* ---------- rides ---------- */
+  #rides { grid-template-columns: 1.3fr 1fr; grid-template-rows: auto 1fr; }
+  .rcol { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: hidden; }
+  .mapbox { padding: 0; overflow: hidden; position: relative; }
+  .mapbox .maplibregl-map { width: 100%; height: 100%; background: #0b1020; border-radius: 18px; }
+  .pinlabel { position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); white-space: nowrap;
+    background: rgba(10,13,24,.85); color: #fff; font: 600 13px system-ui, sans-serif; padding: 3px 8px; border-radius: 7px; }
+  .stopdot { border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 4px #000; }
+  .mapctl { position: absolute; left: 12px; top: 12px; z-index: 5; display: flex; gap: 8px; }
+  .mapctl button { padding: 9px 14px; border-radius: 12px; background: rgba(17,22,40,.88); color: var(--text);
+    font-weight: 700; font-size: 15px; border: 1px solid var(--line); }
+  .meicon { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center;
+    background: rgba(255,122,26,.18); border: 2px solid rgba(255,122,26,.75); box-shadow: 0 0 12px rgba(255,122,26,.5); }
+  .meicon div { width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent;
+    border-bottom: 22px solid #fff; margin-top: -4px; filter: drop-shadow(0 0 2px #000); }
+  .ov { position: absolute; z-index: 4; background: rgba(14,17,28,.88); border: 1px solid var(--line); border-radius: 16px;
+    color: var(--text); pointer-events: none; }
+  .ov-place { top: 62px; left: 12px; padding: 8px 14px; display: none; }
+  .ov-place b { display: block; font-size: 19px; } .ov-place span { font-size: 13px; color: var(--muted); }
+  .ov-speed { left: 12px; bottom: 34px; padding: 10px 16px; display: flex; gap: 16px; align-items: center; }
+  .ov-speed b { font-size: 40px; font-weight: 800; line-height: 1; } .ov-speed small { display: block; font-size: 12px; color: var(--muted); }
+  .ov-speed .comp { width: 46px; height: 46px; border-radius: 50%; border: 2px solid #2f3650; display: grid; place-items: center;
+    font-size: 11px; color: #ff7a1a; font-weight: 800; position: relative; }
+  .ov-speed .comp i { position: absolute; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent;
+    border-bottom: 16px solid #ff7a1a; top: 7px; left: 15px; transform-origin: 6px 14px; }
+  .ov-nav { right: 12px; bottom: 34px; padding: 10px 16px; max-width: 55%; display: none; }
+  .ov-nav b { display: block; font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ov-nav span { font-size: 15px; color: #ffb27a; font-weight: 700; }
+  .flag { font-size: 30px; filter: drop-shadow(0 0 3px #000); transform: translate(10px, -14px); }
+  .pin { width: 22px; height: 22px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 6px #000; }
+  .recenter { position: absolute; right: 12px; bottom: 12px; z-index: 500; padding: 10px 14px; border-radius: 12px;
+    background: rgba(17,22,40,.9); color: var(--text); font-weight: 700; display: none; }
+  .recenter.on { display: block; }
+  .subs { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 15px; text-align: left; margin-top: 8px; }
+  .subs b { color: #ffcf4a; letter-spacing: 1px; }
+  .timer { font-size: 30px; font-weight: 800; } .timer small { font-size: 15px; color: var(--muted); font-weight: 500; }
+  .stopsHead { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+  .av { border-radius: 50%; object-fit: cover; background: #23293f; flex: none; }
+  .who { display: flex; gap: 16px; align-items: center; }
+  .credit { font-size: 11px; color: var(--dim); }
+  .rtabs { width: 420px; }
+  .seatrow { display: grid; grid-template-columns: 1fr 260px; gap: 12px; align-items: center; padding: 12px 6px; border-bottom: 1px solid var(--line); font-size: 19px; }
+  .seatrow select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 10px; font: inherit; }
+  .rpage { grid-column: 1 / -1; overflow-y: auto; }
+  .hrow { display: grid; grid-template-columns: 56px 1fr auto; gap: 14px; align-items: center; padding: 10px 6px;
+    border-bottom: 1px solid var(--line); }
+  .hrow .r { text-align: right; } .hrow small { color: var(--muted); display: block; font-size: 13px; }
+  .pgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 16px; }
+  .pick-av { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 8px; margin-top: 12px; }
+  .pick-av img { width: 76px; height: 76px; border-radius: 50%; object-fit: cover; border: 3px solid transparent; cursor: pointer; }
+  .pick-av img.sel { border-color: var(--accent); }
+  .stopsHead .toggle { width: 220px; }
+  #rides .bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 22px; padding: 12px 18px; padding-right: 220px; }
+  #rides .bar h1 { font-size: 26px; }
+  .kpi b { display: block; font-size: 26px; } .kpi span { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .online { margin-left: auto; padding: 12px 22px; border-radius: 14px; font-weight: 800; font-size: 18px; background: var(--ok); color: #04170d; }
+  .online.off { background: #3a1820; color: #ffb3bd; }
+  .rmain { display: flex; flex-direction: column; justify-content: center; gap: 16px; position: relative; overflow: hidden; }
+  .big1 { font-size: 40px; font-weight: 800; line-height: 1.1; }
+  .big2 { font-size: 22px; color: var(--muted); }
+  .pulse { width: 120px; height: 120px; border-radius: 50%; background: rgba(79,209,139,.15); border: 2px solid var(--ok);
+    animation: pl 1.8s infinite; margin: 0 auto 10px; display: grid; place-items: center; font-size: 46px; }
+  @keyframes pl { 50% { transform: scale(1.08); opacity: .6; } }
+  .reqrow { display: grid; grid-template-columns: 26px 1fr; gap: 6px 10px; font-size: 20px; align-items: start; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; margin-top: 7px; } .dot.p { background: var(--ok); } .dot.d { background: #f06ac0; }
+  .reqrow small { display: block; color: var(--muted); font-size: 14px; }
+  .fare { font-size: 52px; font-weight: 800; } .surge { font-size: 16px; color: var(--late); font-weight: 700; }
+  .rbtns { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+  .rbtns button { padding: 20px; border-radius: 16px; font-size: 22px; font-weight: 800; }
+  .accept { background: var(--ok); color: #04170d; position: relative; overflow: hidden; }
+  .accept i { position: absolute; left: 0; bottom: 0; height: 6px; background: rgba(0,0,0,.35); }
+  .declinebtn { background: var(--panel2); color: var(--muted); }
+  .rside { display: flex; flex-direction: column; gap: 12px; }
+  .note { background: rgba(255,181,71,.12); color: var(--late); border-radius: 10px; padding: 8px 12px; font-size: 16px; }
+  .stars { font-size: 44px; color: #ffcf4a; letter-spacing: 4px; }
+
+  /* ---------- music bar (BeamDeck's player, the captured app, or Android Auto) ---------- */
+  .music { position: fixed; left: 14px; right: 14px; bottom: 10px; height: 56px; z-index: 6; display: flex; align-items: center;
+    gap: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 0 10px 0 8px; overflow: hidden; }
+  .music img { width: 42px; height: 42px; border-radius: 9px; object-fit: cover; background: var(--panel2); flex: none; }
+  .music .what { flex: 1; min-width: 0; }
+  .music .what b { display: block; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .music .what span { display: block; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .music button { flex: none; width: 58px; height: 44px; border-radius: 12px; background: var(--panel2);
+    display: grid; place-items: center; }
+  .music button svg { pointer-events: none; }
+  .music button.pp { width: 76px; background: #2a3150; }
+  .music button:active { background: var(--accent); color: #1a0d14; }
+  .music .vol { width: 46px; color: var(--muted); }
+  .music .time { flex: none; font-size: 14px; color: var(--muted); min-width: 92px; text-align: right; }
+  .music .clock { flex: none; font-size: 20px; font-weight: 700; padding: 0 6px 0 4px; }
+  .music .prog { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); width: 0; transition: width .9s linear; }
+</style>
+</head>
+<body>
+
+<div class="music" id="music">
+  <img id="mCover" alt="">
+  <div class="what"><b id="mTitle">Nothing playing</b><span id="mArtist">Play something in BeamDeck</span></div>
+  <span class="time" id="mTime"></span>
+  <button class="vol" data-c="vol_down" aria-label="Volume down"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+  <button class="vol" data-c="vol_up" aria-label="Volume up"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+  <button data-c="prev" aria-label="Previous"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M6 5h2.5v14H6zM20 5v14L9.5 12z"/></svg></button>
+  <button class="pp" data-c="playpause" id="mPP" aria-label="Play or pause"><svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden="true"><g id="mPlay"><path d="M7 4.5v15l12.5-7.5z"/></g><g id="mPause" style="display:none"><path d="M6.5 5h4v14h-4zM13.5 5h4v14h-4z"/></g></svg></button>
+  <button data-c="next" aria-label="Next"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M15.5 5H18v14h-2.5zM4 5v14l10.5-7z"/></svg></button>
+  <span class="clock" id="mClock">--:--</span>
+  <i class="prog" id="mProg"></i>
+</div>
+
+<div class="modes" id="modes"><button data-m="bus" class="on">🚌 Bus</button><button data-m="rides">🚗 Rides</button></div>
+
+<!-- ============ RIDES ============ -->
+<section class="view" id="rides">
+  <div class="card bar">
+    <h1>Rides</h1>
+    <div class="toggle rtabs" id="rTabs"><button data-v="drive" class="on">Drive</button><button data-v="history">History</button><button data-v="profile">Profile</button><button data-v="seats">Seats</button><button data-v="people">People</button></div>
+    <div class="kpi"><b id="rEarn">$0.00</b><span>Today</span></div>
+    <div class="kpi"><b id="rTrips">0</b><span>Trips</span></div>
+    <div class="kpi"><b id="rRating">–</b><span>Rating</span></div>
+    <button class="online" id="rOnline">Go online</button>
+  </div>
+  <div class="card mapbox"><div id="rMap" style="height:100%"></div><button class="recenter" id="rRecenter">◎ Follow</button></div>
+  <div class="rcol"><div class="card rmain" id="rMain" style="flex:1"></div><div class="rside" id="rSide"></div></div>
+  <div class="card rpage" id="rHistory" style="display:none"></div>
+  <div class="card rpage" id="rProfile" style="display:none"></div>
+  <div class="card rpage" id="rSeats" style="display:none"></div>
+  <div class="card rpage" id="rPeople" style="display:none"></div>
+  <input type="file" id="picFile" accept="image/*" style="display:none">
+</section>
+
+<!-- ============ PICK A ROUTE ============ -->
+<section class="view on" id="pick">
+  <div class="card col">
+    <h1>Real Routes <span class="muted" style="font-weight:400" id="agencyName"></span></h1>
+    <input id="search" placeholder="Route number" inputmode="numeric" autocomplete="off">
+    <div class="scroll"><div class="routes" id="routes"></div></div>
+  </div>
+  <div class="card col">
+    <h1 id="patTitle">Pick a route</h1>
+    <div class="scroll" id="patterns"></div>
+  </div>
+  <div class="card col">
+    <h1>Trip</h1>
+    <div class="toggle" id="clockMode">
+      <button data-v="own" class="on">My own clock</button><button data-v="live">Real time</button>
+    </div>
+    <div class="hint" id="clockHint">The schedule starts when you start, whatever the time of day.</div>
+    <div class="scroll" id="trips"></div>
+    <button class="go" id="start" disabled>Start shift</button>
+    <div class="hint" id="gameHint"></div>
+  </div>
+</section>
+
+<!-- ============ DRIVING ============ -->
+<section class="view" id="drive">
+  <div class="card top">
+    <span class="badge" id="dBadge">111</span>
+    <span class="head" id="dHead">Baseline</span>
+    <span class="conn" id="dConn">game</span>
+    <span class="clock" id="dClock">--:--</span>
+  </div>
+  <div class="card main">
+    <div class="dev"><span class="big" id="devBig">0:00</span><span class="lbl" id="devLbl">On time</span></div>
+    <div>
+      <div class="muted" style="font-size:15px;text-transform:uppercase;letter-spacing:.08em">Next stop <span class="offroute" id="offRoute">· off route</span></div>
+      <div class="nextname" id="nextName">–</div>
+      <div class="nextmeta"><span id="nextTime"></span><span id="nextDist"></span><span id="nextWait"></span></div>
+    </div>
+    <div class="bell" id="bell">🔔 Stop requested</div>
+    <div class="dwell" id="dwell"></div>
+    <div class="stats">
+      <div class="stat"><b id="sOn">0</b><span>On board</span></div>
+      <div class="stat"><b id="sSpeed">0</b><span id="sLimit">km/h</span></div>
+      <div class="stat"><b id="sStop">0/0</b><span>Stops</span></div>
+      <div class="stat"><b id="sComfort">100</b><span>Comfort</span><div class="comfort"><i id="comfortBar" style="width:100%"></i></div></div>
+    </div>
+  </div>
+  <div class="card" style="overflow:hidden;display:flex;flex-direction:column">
+    <div class="stopsHead"><div class="toggle" id="busView"><button data-v="stops" class="on">Stops</button><button data-v="map">Map</button></div></div>
+    <ul class="stops" id="stops"></ul>
+    <div class="mapbox" id="bMapBox" style="flex:1;display:none;border-radius:14px"><div id="bMap" style="height:100%"></div><button class="recenter" id="bRecenter">◎ Follow</button></div>
+  </div>
+  <div class="ctrl" style="grid-row: 2 / 4; grid-column: 3">
+    <button class="doors" id="bDoors" data-cmd="doors">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="1"/><path d="M12 3v18"/></svg>
+      <span id="doorTxt">Doors</span></button>
+    <button data-cmd="kneel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v12M7 11l5 5 5-5M5 20h14"/></svg>Kneel</button>
+    <button data-cmd="hazards"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 20h20Z"/></svg>Hazards</button>
+    <button data-cmd="resync" style="flex:.7;font-size:15px">Resync game</button>
+    <button class="end" id="bEnd">End shift</button>
+  </div>
+  <div class="card log" id="log"></div>
+</section>
+
+<div class="summary" id="summary"><div class="card">
+  <div class="muted" id="sumTitle">End of the line</div>
+  <div class="score" id="sumScore">0</div>
+  <div class="row" id="sumRow"></div>
+  <button class="go" id="sumDone" style="width:100%">Back to routes</button>
+</div></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
+const api = (p, body) => fetch(p, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : {cache: "no-store"}).then(r => r.json());
+let routes = [], selRoute = null, selPat = null, selTrip = null, clockMode = "own", lastBell = false, dismissed = null;
+
+// ---------- picker ----------
+function drawRoutes() {
+  const q = $("search").value.trim();
+  $("routes").innerHTML = routes.filter(r => !q || r.route.startsWith(q)).map(r =>
+    `<button class="${selRoute === r ? "sel" : ""}" data-r="${esc(r.route)}" style="background:#${r.color};color:#${r.text}">${esc(r.route)}</button>`).join("");
+}
+$("routes").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  selRoute = routes.find(r => r.route === b.dataset.r); selPat = selTrip = null;
+  drawRoutes(); drawPatterns(); $("trips").innerHTML = ""; $("start").disabled = true;
+};
+$("search").oninput = drawRoutes;
+function drawPatterns() {
+  if (!selRoute) return;
+  $("patTitle").innerHTML = `<span class="badge" style="background:#${selRoute.color};color:#${selRoute.text}">${esc(selRoute.route)}</span> ${esc(selRoute.name || "")}`;
+  $("patterns").innerHTML = selRoute.directions.map(d => d.patterns.map(p => `
+    <button class="pat ${selPat === p.id ? "sel" : ""}" data-p="${esc(p.id)}">
+      <b>→ ${esc(p.headsign)}</b><small>${esc(p.from)} → ${esc(p.to)} · ${p.stops} stops · ~${p.minutes} min · ${p.trips} trips in the timetable</small>
+    </button>`).join("")).join("");
+}
+$("patterns").onclick = async e => {
+  const b = e.target.closest(".pat"); if (!b) return;
+  selPat = b.dataset.p; selTrip = null; drawPatterns();
+  const d = await api(`api/trips?pattern=${encodeURIComponent(selPat)}`);
+  const now = new Date(), nowS = now.getHours() * 3600 + now.getMinutes() * 60;
+  const list = d.trips;
+  let firstFuture = list.findIndex(t => t.start % 86400 >= nowS);
+  $("trips").innerHTML = list.length ? list.map((t, i) => `
+    <button class="trip ${t.start % 86400 < nowS - 60 ? "past" : ""}" data-t="${esc(t.trip)}" ${i === firstFuture ? 'id="nowTrip"' : ""}>
+      <span>${esc(t.time)}</span><small>${i === firstFuture ? "next" : ""}</small></button>`).join("")
+    : `<div class="hint">No trips on this variant today.</div>`;
+  $("nowTrip")?.scrollIntoView({block: "center"});
+  $("start").disabled = false;   // no trip picked = the next one
+};
+$("trips").onclick = e => {
+  const b = e.target.closest(".trip"); if (!b) return;
+  selTrip = b.dataset.t;
+  document.querySelectorAll(".trip").forEach(x => x.classList.toggle("sel", x === b));
+};
+$("clockMode").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  clockMode = b.dataset.v;
+  document.querySelectorAll("#clockMode button").forEach(x => x.classList.toggle("on", x === b));
+  $("clockHint").textContent = clockMode === "live"
+    ? "Real time: pick a trip leaving soon, or you'll start late (or early)."
+    : "The schedule starts when you start, whatever the time of day.";
+};
+$("start").onclick = async () => {
+  const tripId = selTrip || document.getElementById("nowTrip")?.dataset.t || null;
+  await api("api/start", {pattern: selPat, trip: tripId, live: clockMode === "live"});
+  dismissed = null;
+  show("drive");
+};
+
+// ---------- driving ----------
+function show(v) { document.querySelectorAll(".view").forEach(x => x.classList.toggle("on", x.id === v)); }
+document.querySelector(".ctrl").onclick = e => {
+  const b = e.target.closest("button[data-cmd]"); if (b) api("api/cmd", {cmd: b.dataset.cmd});
+};
+$("bEnd").onclick = () => { if (confirm("End this shift?")) { api("api/cmd", {cmd: "end"}); show("pick"); } };
+$("sumDone").onclick = () => { $("summary").classList.remove("on"); api("api/cmd", {cmd: "end"}); show("pick"); };
+
+function fmtDev(s) {
+  const a = Math.abs(s), m = Math.floor(a / 60), sec = a % 60;
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+let audio;
+function ding() {
+  try {
+    audio = audio || new AudioContext();
+    [0, .18].forEach((d, k) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = k ? 660 : 880; o.connect(g); g.connect(audio.destination);
+      g.gain.setValueAtTime(.0001, audio.currentTime + d);
+      g.gain.exponentialRampToValueAtTime(.3, audio.currentTime + d + .01);
+      g.gain.exponentialRampToValueAtTime(.0001, audio.currentTime + d + .5);
+      o.start(audio.currentTime + d); o.stop(audio.currentTime + d + .55);
+    });
+  } catch {}
+}
+
+let dataWasReady = null;
+function renderData(d) {
+  if (!d) return;
+  if (d.ready && dataWasReady === false) api("api/routes").then(x => { routes = x.routes; showAgency(x); drawRoutes(); });
+  dataWasReady = d.ready;
+  if (d.ready) return;
+  const b = d.bake || {};
+  $("routes").innerHTML = `<div style="grid-column:1/-1" class="hint">
+    ${b.running ? "Downloading and preparing the routes… (about half a minute)"
+      : b.error ? "Couldn't get the routes: " + esc(b.error) : "The routes aren't downloaded yet."}
+    ${b.running ? "" : '<br><br><button class="go" id="bakeBtn" style="width:100%">Download routes</button>'}</div>`;
+  const bb = $("bakeBtn"); if (bb) bb.onclick = () => api("api/bake", {});
+}
+
+function render(st) {
+  renderData(st.data);
+  const g = st.game, s = st.shift;
+  $("gameHint").textContent = g.connected ? (g.ready ? "Game connected · BeamNG.Earth ready" : "Game connected · waiting for BeamNG.Earth's world")
+    : "Game not connected: start BeamNG with the Real Routes mod";
+  $("dConn").textContent = g.connected ? (g.bus ? "bus ✓" : "not a bus") : "game offline";
+  $("dConn").className = "conn " + (g.connected ? "ok" : "bad");
+  if (!s) return;
+  if (mode === "bus" && !$("drive").classList.contains("on") && $("pick").classList.contains("on") && s.state !== "done" && !selPat) show("drive");
+  $("dBadge").textContent = s.route; $("dBadge").style.background = "#" + s.color; $("dBadge").style.color = "#" + s.text;
+  $("dHead").textContent = "→ " + s.headsign + (s.live ? "" : "  ·  trip " + s.trip_start);
+  $("dClock").textContent = s.clock;
+  const d = s.deviation;
+  const cls = d > 300 ? "bad" : d > 60 ? "late" : d < -60 ? "early" : "ok";
+  $("devBig").textContent = (d > 60 ? "+" : d < -60 ? "−" : "") + fmtDev(d);
+  $("devBig").className = "big " + cls;
+  $("devLbl").textContent = d > 60 ? "late" : d < -60 ? "early" : "on time";
+  $("devLbl").className = "lbl " + cls;
+  const n = s.next[0];
+  if (n) {
+    $("nextName").textContent = n.name;
+    $("nextTime").textContent = "Due " + n.time;
+    $("nextDist").textContent = n.dist > 0 ? (n.dist >= 1000 ? (n.dist / 1000).toFixed(1) + " km" : n.dist + " m") : "here";
+    $("nextWait").innerHTML = n.need
+      ? `<span class="bad">● Stop</span>` + (n.waiting ? ` · ${n.waiting} waiting` : "") + (n.off ? ` · ${n.off} getting off` : "")
+      : `<span class="ok">No one · drive past</span>`;
+  }
+  $("offRoute").classList.toggle("on", !!s.off_route);
+  $("bell").classList.toggle("on", !!s.requested && s.state !== "dwelling");
+  if (s.requested && !lastBell) ding();
+  lastBell = s.requested;
+  const dw = s.dwell;
+  $("dwell").classList.toggle("on", !!dw);
+  if (dw) $("dwell").innerHTML = dw.ready
+    ? (dw.wait_sched > 0 ? `✓ All aboard · <span class="early">hold ${fmtDev(dw.wait_sched)} for the schedule</span>` : `<span class="ok">✓ All aboard · close the doors</span>`)
+    : `Boarding… <b>${dw.boarded}</b> on · <b>${dw.alighted}</b> off`;
+  $("sOn").textContent = s.onboard;
+  $("sSpeed").textContent = s.speed;
+  $("sLimit").textContent = g.speedLimit ? `km/h · limit ${Math.round(g.speedLimit * 3.6)}` : "km/h";
+  $("sSpeed").className = g.speedLimit && s.speed > g.speedLimit * 3.6 + 5 ? "bad" : "";
+  $("sStop").textContent = `${Math.min(s.index + 1, s.total)}/${s.total}`;
+  $("sComfort").textContent = s.comfort;
+  $("comfortBar").style.width = s.comfort + "%";
+  $("comfortBar").style.background = s.comfort > 75 ? "var(--ok)" : s.comfort > 45 ? "var(--late)" : "var(--bad)";
+  $("bDoors").classList.toggle("open", !!s.doors);
+  $("doorTxt").textContent = s.doors ? "Close doors" : "Open doors";
+  $("stops").innerHTML = s.next.map((x, k) => `
+    <li class="${k ? "" : "first"}" style="${x.need ? "" : "opacity:.55"}"><span class="n">${x.need ? "● " : ""}${esc(x.name)}</span><span class="t">${esc(x.time)}</span>
+    <span class="m">#${esc(x.code)} · ${x.dist >= 1000 ? (x.dist / 1000).toFixed(1) + " km" : Math.max(0, x.dist) + " m"}${x.waiting ? ` · ${x.waiting} waiting` : ""}${x.off ? ` · ${x.off} off` : ""}</span></li>`).join("");
+  $("log").innerHTML = s.events.slice().reverse().map(e => `<span class="${e.kind}">${esc(e.text)}</span>`).join("");
+  $("log").style.display = s.events.length ? "" : "none";       // no empty strip above the music bar
+  if (s.summary && dismissed !== s.trip_start + s.route) {
+    const m = s.summary;
+    $("sumScore").textContent = m.score;
+    $("sumRow").innerHTML = [["On time", m.on_time_pct + "%"], ["Comfort", m.comfort], ["Carried", m.carried],
+      ["Missed stops", m.missed], ["Left behind", m.left_behind], ["Rough moments", m.jolts + m.throws]]
+      .map(([k, v]) => `<div class="stat"><b>${esc(v)}</b><span>${k}</span></div>`).join("");
+    $("summary").classList.add("on");
+    dismissed = s.trip_start + s.route;
+  }
+}
+
+// ---------- live map: OpenFreeMap's "dark" street map (the same as the Live GPS phone app's), drawn by MapLibre ----------
+const MAP_STYLES = [["dark", "Dark"], ["fiord", "Fiord"], ["liberty", "Liberty"]];
+const VIEWS = [["north", "⬆ North up"], ["heading", "🧭 Heading up"], ["chase", "🚗 3D chase"]];
+const pref = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
+const savePref = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+let mapStyle = pref("rrMapStyle", "dark"), mapView = pref("rrMapView", "chase");
+let mapFlat = false;          // a regular BeamNG map: the level's own roads instead of real streets
+const allMaps = [];
+const placedReset = () => allMaps.forEach(x => x.replace && x.replace());
+function RRMap(el, btn) {
+  if (!window.maplibregl) return null;
+  const m = new maplibregl.Map({container: el, style: `https://tiles.openfreemap.org/styles/${mapStyle}`,
+    center: [-75.6972, 45.4215], zoom: 15.5, attributionControl: {compact: true}, dragRotate: false, pitchWithRotate: false,
+    // the tablet's GPU: draw at ~1.25x instead of the screen's 2x (3D buildings cost per pixel), no fades
+    pixelRatio: Math.min(window.devicePixelRatio || 1, 1.25), fadeDuration: 0, antialias: false, maxTileCacheSize: 80});
+  // view and style buttons (shared by every map on the page, remembered on the tablet)
+  const ctl = document.createElement("div"); ctl.className = "mapctl";
+  const bView = document.createElement("button"), bStyle = document.createElement("button");
+  ctl.append(bView, bStyle); el.parentElement.appendChild(ctl);
+  const labels = () => {
+    bView.textContent = VIEWS.find(v => v[0] === mapView)[1];
+    bStyle.textContent = mapFlat ? "🗺 Level map" : "🗺 " + MAP_STYLES.find(v => v[0] === mapStyle)[1];
+  };
+  bView.onclick = () => {
+    mapView = VIEWS[(VIEWS.findIndex(v => v[0] === mapView) + 1) % VIEWS.length][0]; savePref("rrMapView", mapView);
+    allMaps.forEach(x => x.applyView());
+  };
+  bStyle.onclick = () => {
+    if (mapFlat) return;                      // a regular map has only its own road map
+    mapStyle = MAP_STYLES[(MAP_STYLES.findIndex(v => v[0] === mapStyle) + 1) % MAP_STYLES.length][0]; savePref("rrMapStyle", mapStyle);
+    allMaps.forEach(x => x.applyStyle());
+  };
+  labels();
+  const ov = (cls, html) => { const d = document.createElement("div"); d.className = "ov " + cls; d.innerHTML = html; el.parentElement.appendChild(d); return d; };
+  const oPlace = ov("ov-place", "<b></b><span></span>");
+  const oSpeed = ov("ov-speed", '<div><b>0</b><small>KM/H</small></div><div class="comp"><i></i></div>');
+  const oNav = ov("ov-nav", "<b></b><span></span>");
+  const flagEl = document.createElement("div"); flagEl.className = "flag"; flagEl.textContent = "🏁";
+  const flag = new maplibregl.Marker({element: flagEl, anchor: "bottom-left"});
+  const meEl = document.createElement("div"); meEl.className = "meicon"; meEl.innerHTML = "<div></div>";
+  const me = new maplibregl.Marker({element: meEl, rotationAlignment: "map"});
+  let follow = true, placed = false, lastTouch = 0, ready = false, pinMarkers = [];
+  const data = {route: [], shape: [], shapeColor: "#e8273b"};
+  const line = pts => ({type: "Feature", geometry: {type: "LineString", coordinates: (pts || []).map(p => [p[1], p[0]])}});
+  let lastPos = null;
+  const vsrc = () => { const src = (m.getStyle() || {}).sources || {};
+    return src.openmaptiles ? "openmaptiles" : Object.keys(src).find(k => src[k].type === "vector"); };
+  const addLayers = () => {
+    if (m.getSource("route")) return;
+    const dark = mapStyle !== "liberty", layers = (m.getStyle() || {}).layers || [];
+    // a little colour for water and parks on the dark styles
+    if (dark) for (const l of layers) {
+      try {
+        if (l["source-layer"] === "water" && l.type === "fill") m.setPaintProperty(l.id, "fill-color", "#16303f");
+        if (l["source-layer"] === "park" && l.type === "fill") m.setPaintProperty(l.id, "fill-color", "#17251b");
+        if (l["source-layer"] === "landcover" && l.type === "fill") m.setPaintProperty(l.id, "fill-color", "#171f1a");
+      } catch {}
+    }
+    // under the labels: the bus route, the GPS route (glow + line), then solid 3D buildings
+    let last = -1; layers.forEach((l, i) => { if (l.type !== "symbol") last = i; });
+    const before = layers[last + 1] ? layers[last + 1].id : undefined;
+    m.addSource("shape", {type: "geojson", data: line(data.shape)});
+    m.addLayer({id: "shape", type: "line", source: "shape", paint: {"line-color": data.shapeColor, "line-width": 5, "line-opacity": .5},
+      layout: {"line-cap": "round", "line-join": "round"}}, before);
+    m.addSource("route", {type: "geojson", data: line(data.route)});
+    m.addLayer({id: "route-glow", type: "line", source: "route", paint: {"line-color": "#ff7a1a", "line-width": 18, "line-opacity": .22, "line-blur": 6},
+      layout: {"line-cap": "round", "line-join": "round"}}, before);
+    m.addLayer({id: "route", type: "line", source: "route", paint: {"line-color": "#ff7a1a", "line-width": 7},
+      layout: {"line-cap": "round", "line-join": "round"}}, before);
+    const v = vsrc();
+    const own = layers.filter(l => l.type === "fill-extrusion").map(l => l.id);
+    if (!own.length && v) m.addLayer({id: "bld3d", type: "fill-extrusion", source: v, "source-layer": "building", minzoom: 14,
+      paint: {"fill-extrusion-color": dark ? "#5b616b" : "#ddd6cb", "fill-extrusion-opacity": 1,
+        "fill-extrusion-height": ["interpolate", ["linear"], ["zoom"], 14, 0, 15.5, ["coalesce", ["get", "render_height"], 8]],
+        "fill-extrusion-base": ["interpolate", ["linear"], ["zoom"], 14, 0, 15.5, ["coalesce", ["get", "render_min_height"], 0]]}}, before);
+    for (const id of own) { try { m.moveLayer(id, before); m.setPaintProperty(id, "fill-extrusion-opacity", 1);
+      if (dark) m.setPaintProperty(id, "fill-extrusion-color", "#5b616b"); } catch {} }
+    try { m.setLight({anchor: "map", color: "#ffffff", intensity: dark ? .3 : .35, position: [1.5, 200, 20]}); } catch {}
+    ready = true;
+  };
+  m.on("load", addLayers);
+  m.on("style.load", addLayers);   // a new style drops the added layers: put them back
+  m.on("dragstart", () => { follow = false; lastTouch = Date.now(); btn.classList.add("on"); });
+  btn.onclick = () => { follow = true; btn.classList.remove("on"); };
+  const set = (id, pts) => { if (ready && m.getSource(id)) m.getSource(id).setData(line(pts)); };
+  // heading up / chase: the map turns with the car and the car sits low on the screen, so more road shows ahead
+  const camera = (lat, lon, hd, dur) => {
+    const h = el.clientHeight || 600;
+    const turn = mapView !== "north";
+    m.easeTo({center: [lon, lat], bearing: turn ? (hd || 0) : 0, pitch: mapView === "chase" ? 60 : 0,
+      padding: turn ? {top: h * 0.38, bottom: 0, left: 0, right: 0} : {top: 0, bottom: 0, left: 0, right: 0},
+      duration: dur});
+  };
+  const obj = {
+    map: m,
+    replace() { placed = false; },          // jump (not glide) to the car in the new map
+    applyView() { labels(); follow = true; btn.classList.remove("on"); if (lastPos) camera(...lastPos, 600); },
+    async applyStyle() {
+      labels(); ready = false;
+      if (mapFlat) {
+        try { m.setStyle((await api("api/mapstyle")).style); } catch {}
+      } else m.setStyle(`https://tiles.openfreemap.org/styles/${mapStyle}`);
+    },
+    me(lat, lon, hd) {
+      if (lat == null) return;
+      if (!el.offsetParent) { lastPos = [lat, lon, hd]; return; }   // hidden: nothing to draw
+      lastPos = [lat, lon, hd];
+      me.setLngLat([lon, lat]).setRotation(hd || 0);
+      if (!placed) { me.addTo(m); placed = true; m.jumpTo({center: [lon, lat], zoom: mapView === "chase" ? 17 : 16}); }
+      if (!follow && Date.now() - lastTouch > 20000) { follow = true; btn.classList.remove("on"); }
+      if (follow) camera(lat, lon, hd, 110);
+    },
+    route(pts) {
+      data.route = pts || []; set("route", data.route);
+      const end = data.route[data.route.length - 1];
+      if (end) flag.setLngLat([end[1], end[0]]).addTo(m); else flag.remove();
+    },
+    hud(g, dest) {
+      const pl = g.place || {};
+      oPlace.style.display = pl.street || pl.place ? "block" : "none";
+      oPlace.querySelector("b").textContent = pl.street || pl.place || "";
+      oPlace.querySelector("span").textContent = pl.street ? [pl.place, pl.region].filter(Boolean).join(", ") : (pl.region || "");
+      oSpeed.querySelector("b").textContent = Math.round((g.speed || 0) * 3.6);
+      oSpeed.querySelector("i").style.transform = `rotate(${g.heading || 0}deg)`;
+      const name = dest || g.gpsName;
+      oNav.style.display = name && g.gpsLeft != null ? "block" : "none";
+      if (name) {
+        oNav.querySelector("b").textContent = name;
+        const km = (g.gpsLeft || 0) >= 1000 ? ((g.gpsLeft || 0) / 1000).toFixed(1) + " km" : Math.round(g.gpsLeft || 0) + " m";
+        const eta = g.gpsEta ? ` · ${Math.max(1, Math.round(g.gpsEta / 60))} min` : "";
+        oNav.querySelector("span").textContent = km + eta;
+      }
+    },
+    shape(pts, color) {
+      data.shape = pts || []; if (color) data.shapeColor = color;
+      set("shape", data.shape);
+      if (ready && color) m.setPaintProperty("shape", "line-color", color);
+    },
+    pins(list) {
+      const key = JSON.stringify(list);
+      if (key === this._pinKey) return;          // unchanged: keep the markers (no flicker)
+      this._pinKey = key;
+      pinMarkers.forEach(x => x.remove()); pinMarkers = [];
+      for (const p of list) {
+        const el = document.createElement("div");
+        if (p.small) { const sz = p.next ? 16 : 10; el.className = "stopdot"; el.style.cssText = `width:${sz}px;height:${sz}px;background:${p.color}`; }
+        else el.innerHTML = `<div class="pin" style="background:${p.color}"></div>`;
+        if (p.label && (!p.small || p.next)) { const t = document.createElement("div"); t.className = "pinlabel"; t.textContent = p.label; el.style.position = "relative"; el.appendChild(t); }
+        pinMarkers.push(new maplibregl.Marker({element: el}).setLngLat([p.lon, p.lat]).addTo(m));
+      }
+    },
+    resize() { m.resize(); },
+  };
+  allMaps.push(obj);
+  return obj;
+}
+const rMap = RRMap($("rMap"), $("rRecenter"));
+const bMap = RRMap($("bMap"), $("bRecenter"));
+let routeVer = null, shapeFor = null, busStops = [];
+async function updateRoute(v) {
+  if (v === routeVer) return;
+  routeVer = v;
+  const r = await api("api/route");
+  [rMap, bMap].forEach(mp => mp && mp.route(r.points));
+}
+$("busView").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  document.querySelectorAll("#busView button").forEach(x => x.classList.toggle("on", x === b));
+  const map = b.dataset.v === "map";
+  $("stops").style.display = map ? "none" : "";
+  $("bMapBox").style.display = map ? "" : "none";
+  if (map && bMap) setTimeout(() => bMap.resize(), 50);
+};
+
+// ---------- mode: bus or rides ----------
+let mode = "bus"; try { mode = localStorage.getItem("rrMode") || "bus"; } catch {}
+function setMode(m) {
+  mode = m; try { localStorage.setItem("rrMode", m); } catch {}
+  document.querySelectorAll("#modes button").forEach(b => b.classList.toggle("on", b.dataset.m === m));
+  if (m === "rides") { show("rides"); setTimeout(() => rMap && rMap.resize(), 50); }
+  else show(lastShift && lastShift.state !== "done" ? "drive" : "pick");
+}
+$("modes").onclick = e => { const b = e.target.closest("button"); if (b) setMode(b.dataset.m); };
+const money = v => "$" + (v || 0).toFixed(2);
+const ride = a => api("api/rides", {action: a});
+$("rOnline").onclick = () => ride(lastRides && lastRides.state !== "offline" ? "offline" : "online");
+let lastRides = null, lastShift = null, lastReqKey = null, shownLast = null, rTab = "drive", lastGame = {};
+let picV = 0;                                  // bumped when a picture is replaced, so the page loads the new one
+const avSrc = n => `avatars/${encodeURIComponent(n)}.jpg${picV ? "?v=" + picV : ""}`;
+const avatar = (n, size) => n ? `<img class="av" src="${avSrc(n)}" width="${size}" height="${size}" alt="">`
+  : `<div class="av" style="width:${size}px;height:${size}px;display:grid;place-items:center;font-size:${size / 2.4}px">🙂</div>`;
+$("rTabs").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  rTab = b.dataset.v;
+  document.querySelectorAll("#rTabs button").forEach(x => x.classList.toggle("on", x === b));
+  const drive = rTab === "drive";
+  document.querySelector("#rides .mapbox").style.display = drive ? "" : "none";
+  document.querySelector("#rides .rcol").style.display = drive ? "" : "none";
+  $("rHistory").style.display = rTab === "history" ? "" : "none";
+  $("rProfile").style.display = rTab === "profile" ? "" : "none";
+  $("rSeats").style.display = rTab === "seats" ? "" : "none";
+  $("rPeople").style.display = rTab === "people" ? "" : "none";
+  if (rTab === "people") drawPeople();
+  if (rTab === "seats") { api("api/seats", {}); setTimeout(drawSeats, 600); }
+  if (rTab === "history") drawHistory();
+  if (rTab === "profile") drawProfile();
+  if (drive && rMap) setTimeout(() => rMap.resize(), 50);
+};
+// people in the car's seats (BeamNG's seat occupants), outside rides too
+async function drawSeats() {
+  const d = await api("api/seats");
+  const opts = n => `<option value="">— empty —</option>` + d.characters.map(c => `<option ${c === n ? "selected" : ""}>${esc(c)}</option>`).join("");
+  $("rSeats").innerHTML = `<h1 style="margin-bottom:6px">Seats ${d.model ? `<span class="muted" style="font-size:18px">· ${esc(d.model)}</span>` : ""}</h1>
+    <div class="hint">Put people with 3D models in the car's seats, the driver's included. The car reloads in place when a seat changes, so do it while stopped.</div>` +
+    (d.seats.length ? d.seats.map(st => `<div class="seatrow"><div>${esc(st.name || st.id)}${st.driver ? ' <span class="muted">(you)</span>' : st.taken ? ' <span class="muted">(BeamNG passenger)</span>' : ""}</div>
+      ${st.taken ? "<div></div>" : `<select data-seat="${esc(st.id)}">${opts(st.who)}</select>`}</div>`).join("")
+      : `<div class="big2" style="margin-top:16px">No seats reported yet: get in a car, then tap Refresh.</div>`) +
+    `<div class="rbtns" style="grid-template-columns:1fr;margin-top:14px"><button class="declinebtn" id="seatRefresh">Refresh</button></div>`;
+  document.querySelectorAll("#rSeats select").forEach(el => el.onchange = async () => {
+    await api("api/seats", {seat: el.dataset.seat, avatar: el.value}); setTimeout(drawSeats, 700);
+  });
+  $("seatRefresh").onclick = () => { api("api/seats", {}); setTimeout(drawSeats, 600); };
+}
+
+// ---------- pictures: chosen on this device, cropped here, sent as files ready to use ----------
+function pickPicture(then) {
+  const f = $("picFile");
+  f.value = "";
+  f.onchange = () => {
+    const file = f.files[0]; if (!file) return;
+    const img = new Image();
+    img.onload = () => { then(img); URL.revokeObjectURL(img.src); };
+    img.onerror = () => alert("That file isn't a picture this browser can open.");
+    img.src = URL.createObjectURL(file);
+  };
+  f.click();
+}
+// the part of a picture that fills a w x h frame (faces are usually in the upper part, so tall pictures keep the top)
+function cover(img, w, h) {
+  const s = Math.max(w / img.naturalWidth, h / img.naturalHeight);
+  const sw = w / s, sh = h / s;
+  return [(img.naturalWidth - sw) / 2, (img.naturalHeight - sh) * 0.18, sw, sh];
+}
+function squarePicture(img) {                      // the round picture: 256 px JPEG
+  const c = document.createElement("canvas"); c.width = c.height = 256;
+  c.getContext("2d").drawImage(img, ...cover(img, 256, 256), 0, 0, 256, 256);
+  return c.toDataURL("image/jpeg", 0.88);
+}
+function cardPicture(img) {                        // the roadside card: tall, white border, rounded corners
+  const W = 450, H = 825, b = 10, r = 34;
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const x = c.getContext("2d");
+  const round = (x0, y0, w, h, rad) => { x.beginPath(); x.roundRect(x0, y0, w, h, rad); };
+  round(0, 0, W, H, r); x.fillStyle = "#fff"; x.fill();
+  round(b, b, W - 2 * b, H - 2 * b, r - b); x.save(); x.clip();
+  x.drawImage(img, ...cover(img, W - 2 * b, H - 2 * b), b, b, W - 2 * b, H - 2 * b);
+  x.restore();
+  return c.toDataURL("image/png");
+}
+
+// ---------- People: the player's own riders, and who asks for rides ----------
+let newPic = null;
+async function drawPeople() {
+  const d = await api("api/people");
+  const pools = [["mixed", "Everyone"], ["custom", "Only my people"], ["generic", "Only built-in"]];
+  $("rPeople").innerHTML = `<h1 style="margin-bottom:6px">People</h1>
+    <div class="hint">Riders are ${d.generic} built-in people plus anyone you add here. Add a friend with a name and a picture;
+      the picture is cropped on this device and becomes their round picture and their roadside card.</div>
+    <div class="hint" style="margin-top:14px">Who asks for rides:</div>
+    <div class="toggle" id="poolSel" style="margin-top:8px;max-width:560px">${pools.map(([k, t]) =>
+      `<button data-p="${k}" class="${d.pool === k ? "on" : ""}">${t}</button>`).join("")}</div>
+    <div class="hint" style="margin-top:18px">Add a person:</div>
+    <div class="who" style="margin-top:8px;gap:12px">
+      <div id="newPrev">${newPic ? `<img class="av" src="${newPic.square}" width="76" height="76">` : avatar(null, 76)}</div>
+      <input id="newName" placeholder="Name" maxlength="40" style="flex:1;font-size:22px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;color:var(--text);padding:10px 14px">
+      <button class="declinebtn" id="newPick" style="padding:12px 18px;border-radius:12px">Choose picture</button>
+      <button class="accept" id="newAdd" style="padding:12px 22px;border-radius:12px;font-weight:800">Add</button></div>
+    <div class="hint" style="margin-top:18px">${d.custom.length ? "Your people (" + d.custom.length + "):" : "You haven't added anyone yet."}</div>
+    <div class="pick-av" style="grid-template-columns:repeat(auto-fill,minmax(210px,1fr))">${d.custom.map(p =>
+      `<div class="hrow" style="grid-template-columns:auto 1fr auto;align-items:center;gap:10px;padding:6px 0">
+         <img class="av" src="${avSrc(p.avatar)}" width="52" height="52" style="border:0">
+         <div><b>${esc(p.name)}</b>${p.credit ? `<small>${esc(p.credit)}</small>` : ""}</div>
+         <button class="declinebtn" data-del="${esc(p.avatar)}" style="padding:8px 12px;border-radius:10px">Remove</button></div>`).join("")}</div>`;
+  $("poolSel").onclick = async e => {
+    const b = e.target.closest("button"); if (!b) return;
+    await api("api/people", {action: "pool", pool: b.dataset.p}); drawPeople();
+  };
+  $("newPick").onclick = () => pickPicture(img => {
+    newPic = {square: squarePicture(img), card: cardPicture(img)};
+    $("newPrev").innerHTML = `<img class="av" src="${newPic.square}" width="76" height="76">`;
+  });
+  $("newAdd").onclick = async () => {
+    const name = $("newName").value.trim();
+    if (!name || !newPic) return alert("Give them a name and choose a picture first.");
+    const r = await api("api/people", {action: "add", name, picture: newPic.square, card: newPic.card});
+    if (!r.ok) return alert(r.error || "Couldn't add them.");
+    newPic = null; picV = Date.now(); drawPeople();
+  };
+  document.querySelectorAll("#rPeople [data-del]").forEach(b => b.onclick = async () => {
+    if (!confirm("Remove " + b.dataset.del + "?")) return;
+    await api("api/people", {action: "delete", name: b.dataset.del}); drawPeople();
+  });
+}
+
+async function drawHistory() {
+  const h = (await api("api/history")).history;
+  $("rHistory").innerHTML = `<h1 style="margin-bottom:8px">Ride history</h1>` + (h.length ? h.map(x => {
+    const d = new Date(x.t * 1000);
+    return `<div class="hrow">${avatar(x.avatar, 52)}
+      <div><b>${esc(x.name)}</b> <span class="muted">· ${d.toLocaleDateString([], {month: "short", day: "numeric"})} ${d.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}</span>
+        <small>${esc(x.pickup)} → ${esc(x.dest)} · ${x.km} km${x.trip_time ? " · " + x.trip_time : ""}</small>
+        ${x.comment ? `<small>“${esc(x.comment)}”</small>` : ""}</div>
+      <div class="r">${x.cancelled ? '<span class="bad">Cancelled</span>' : `<b>${money(x.pay)}</b><small style="color:#ffcf4a">${"★".repeat(x.stars)}</small>`}</div></div>`;
+  }).join("") : `<div class="big2">No rides yet. Go online on the Drive tab.</div>`);
+}
+function drawProfile() {
+  const r = lastRides; if (!r) return;
+  const me = r.me;
+  $("rProfile").innerHTML = `
+    <div class="who">${avatar(me.avatar, 110)}
+      <div style="flex:1"><input id="meName" value="${esc(me.name)}" style="font-size:30px;font-weight:800;background:none;border:0;color:var(--text);width:100%">
+        <div class="big2">Driver since ${esc(me.since)} · ${r.rating ? r.rating.toFixed(2) + " ★" : "no ratings yet"}${lastGame.model ? " · driving a " + esc(lastGame.model) : ""}</div></div></div>
+    <div class="pgrid">
+      <div class="stat"><b>${me.trips}</b><span>Trips</span></div>
+      <div class="stat"><b>${money(me.earned)}</b><span>Earned</span></div>
+      <div class="stat"><b>${me.five}</b><span>5★ rides</span></div>
+      <div class="stat"><b>${me.km}</b><span>km driven</span></div>
+      <div class="stat"><b>${me.accept == null ? "–" : me.accept + "%"}</b><span>Accepted</span></div>
+      <div class="stat"><b>${me.cancelled}</b><span>Cancelled</span></div>
+      <div class="stat"><b>${money(r.today.earned)}</b><span>Today</span></div>
+      <div class="stat"><b>${r.today.trips}</b><span>Trips today</span></div>
+    </div>
+    <div class="hint" style="margin-top:18px">Your picture: upload one, or pick one of your people.</div>
+    <div class="rbtns" style="grid-template-columns:auto auto 1fr;margin-top:10px">
+      <button class="declinebtn" id="meUpload">Upload a picture</button>
+      ${me.avatar ? '<button class="declinebtn" id="meNoPic">Remove</button>' : "<span></span>"}<span></span></div>
+    <div class="pick-av">${r.riders.map(n => `<img src="${avSrc(n)}" data-n="${esc(n)}" title="${esc(n)}" class="${n === me.avatar ? "sel" : ""}">`).join("")}</div>`;
+  $("meName").onchange = e => api("api/profile", {name: e.target.value});
+  $("meUpload").onclick = () => pickPicture(async img => {
+    await api("api/profile", {picture: squarePicture(img)}); picV = Date.now(); setTimeout(drawProfile, 500);
+  });
+  if ($("meNoPic")) $("meNoPic").onclick = async () => { await api("api/profile", {avatar: null}); setTimeout(drawProfile, 400); };
+  document.querySelectorAll(".pick-av img").forEach(i => i.onclick = async () => { await api("api/profile", {avatar: i.dataset.n}); setTimeout(drawProfile, 300); });
+}
+
+function renderRides(r, g) {
+  lastRides = r;
+  if (!r) return;
+  $("rEarn").textContent = money(r.today.earned);
+  $("rTrips").textContent = r.today.trips;
+  $("rRating").textContent = r.rating ? r.rating.toFixed(2) + " ★" : "–";
+  const on = r.state !== "offline";
+  $("rOnline").textContent = on ? "Go offline" : "Go online";
+  $("rOnline").className = "online" + (on ? " off" : "");
+  const q = r.req, M = $("rMain");
+  let side = "";
+  if (!g.connected) M.innerHTML = `<div class="big1">Game not connected</div><div class="big2">Start BeamNG and load BeamNG.Earth's world.</div>`;
+  else if (r.state === "offline") M.innerHTML = `<div class="big1">You're offline</div><div class="big2">Go online to get ride requests from real places around you. Any car works.</div>`;
+  else if (r.state === "online") M.innerHTML = `<div class="pulse">🚗</div><div class="big1" style="text-align:center">Finding riders…</div>
+      <div class="big2" style="text-align:center">${r.places ? r.places + " places nearby" : "Looking up places round you…"}</div>`;
+  else if (q && r.state === "offered") {
+    const key = q.name + q.dest.name;
+    if (key !== lastReqKey) { lastReqKey = key; ding(); }
+    M.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+        <div class="who">${avatar(q.avatar, 96)}
+          <div><div class="big1">${esc(q.name)}</div>
+          <div class="big2">★ ${q.rating.toFixed(2)} · ${q.rides} rides · rider since ${q.since}</div>
+          ${q.credit ? `<div class="credit">Art: ${esc(q.credit)}</div>` : ""}</div></div>
+        <div style="text-align:right"><div class="fare">${money(q.fare)}</div>${q.surge > 1 ? `<div class="surge">⚡ ${q.surge}× busy</div>` : ""}</div>
+      </div>
+      <div class="big2">${q.km} km · ~${q.mins} min trip · pickup ${q.pickup_m >= 1000 ? (q.pickup_m / 1000).toFixed(1) + " km" : q.pickup_m + " m"} away</div>
+      ${q.note ? `<div class="note">💬 ${esc(q.note)}</div>` : ""}
+      <div class="reqrow"><span class="dot p"></span><div>${esc(q.pickup.name)}<small>${esc(q.pickup.cat)}</small></div>
+        <span class="dot d"></span><div>${esc(q.dest.name)}<small>${esc(q.dest.cat)}</small></div></div>
+      <div class="rbtns"><button class="accept" id="rAccept">Accept<i style="width:${100 * (q.left_s || 0) / 20}%"></i></button>
+        <button class="declinebtn" id="rDecline">Decline</button></div>`;
+    $("rAccept").onclick = () => ride("accept"); $("rDecline").onclick = () => ride("decline");
+  } else if (q) {
+    const d = q.dist == null ? "" : q.dist >= 1000 ? (q.dist / 1000).toFixed(1) + " km" : q.dist + " m";
+    const head = r.state === "to_pickup" ? `Pick up ${esc(q.name)}` : r.state === "boarding" ? `${esc(q.name)} is getting in…` : `Drop off ${esc(q.name)}`;
+    const where = r.state === "on_trip" ? q.dest : q.pickup;
+    M.innerHTML = `<div class="who">${avatar(q.avatar, 64)}<div><div class="big2">${r.state === "on_trip" ? "On trip" : "Pickup"}</div>
+      <div class="big1">${head}</div></div></div>
+      <div class="reqrow"><span class="dot ${r.state === "on_trip" ? "d" : "p"}"></span><div>${esc(where.name)}<small>${esc(where.cat)} · ${d}</small></div></div>
+      ${q.note ? `<div class="note">💬 ${esc(q.note)}</div>` : ""}
+      <div class="rbtns" style="grid-template-columns:1fr"><button class="declinebtn" id="rCancel">Cancel ride</button></div>`;
+    $("rCancel").onclick = () => { if (confirm("Cancel this ride?")) ride("cancel"); };
+    const mm = t => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+    const over = q.expect && q.timer > q.expect;
+    side = `<div class="card" style="display:flex;justify-content:space-between;align-items:center">
+        <div class="timer ${over ? "late" : ""}">${mm(q.timer || 0)} <small>/ ~${mm(q.expect || 0)} expected</small></div>
+        <div style="text-align:right"><b style="font-size:22px">${money(q.fare)}</b><div class="muted" style="font-size:13px">${q.jolts} rough · ${q.crash} crash</div></div></div>`;
+  }
+  const lim = r.limit ? Math.round(r.limit * 3.6) : null;
+  side = `<div class="stat card"><b class="${lim && r.speed > lim + 12 ? "bad" : ""}">${r.speed}</b><span>km/h${lim ? " · limit " + lim : ""}</span></div>` + side;
+  if (r.last && Date.now() / 1000 - r.last.t < 25) {
+    const L = r.last;
+    side = `<div class="card" style="background:var(--panel2);text-align:center">
+      <div style="display:flex;justify-content:center">${avatar(L.avatar, 64)}</div>
+      <div class="muted">${esc(L.name)} → ${esc(L.dest)}</div>
+      <div class="stars">${"★".repeat(L.stars)}<span style="color:#3a4060">${"★".repeat(5 - L.stars)}</span></div>
+      <div class="fare" style="font-size:40px">${money(L.pay)}</div>
+      <div class="muted">fare ${money(L.fare)}${L.tip ? " + tip " + money(L.tip) : ""}</div>
+      <div style="font-size:18px;margin-top:8px">“${esc(L.comment || "")}”</div>
+      <div class="subs">
+        <span>Pickup ${L.pickup_time} <small class="muted">(~${L.pickup_expect})</small></span><b>${"★".repeat(L.sub.pickup)}</b>
+        <span>Trip ${L.trip_time} <small class="muted">(~${L.trip_expect})</small></span><b>${"★".repeat(L.sub.trip)}</b>
+        <span>Smooth ride</span><b>${"★".repeat(L.sub.smooth)}</b>
+        <span>Safe driving</span><b>${"★".repeat(L.sub.safety)}</b>
+      </div></div>` + side;
+    if (shownLast !== L.t) { shownLast = L.t; ding(); }
+  }
+  $("rSide").innerHTML = side;
+}
+
+let lastRaw = "";
+async function tick() {
+  try {
+    const raw = await fetch("api/state", {cache: "no-store"}).then(r => r.text());
+    if (raw === lastRaw) return;      // nothing new: no redraw
+    lastRaw = raw;
+    const st = JSON.parse(raw);
+    lastShift = st.shift;
+    document.body.classList.toggle("driving", !!(st.shift && st.shift.state !== "done") && mode === "bus");
+    render(st);
+    renderRides(st.rides, st.game);
+    const g = st.game; lastGame = g;
+    if (g.connected && !!g.flat !== mapFlat) {          // switched between BeamNG.Earth and a regular map
+      mapFlat = !!g.flat; placedReset(); allMaps.forEach(x => x.applyStyle());
+    }
+    // (the car's position comes from poseTick, 10 times a second)
+    const rq = st.rides && st.rides.req;
+    const rDest = rq ? (st.rides.state === "on_trip" ? "Drop-off: " + rq.dest.name : "Pickup: " + rq.pickup.name) : null;
+    if (rMap) rMap.hud(g, rDest);
+    if (bMap) bMap.hud(g, st.shift && st.shift.next[0] ? "Next stop: " + st.shift.next[0].name : null);
+    if (g.connected) updateRoute(g.routeVersion);
+    // rides: pickup / drop-off pins
+    const q = st.rides && st.rides.req;
+    if (rMap) rMap.pins(q ? [
+      ...(st.rides.state !== "on_trip" ? [{lat: q.pickup.lat, lon: q.pickup.lon, color: "#4fd18b", label: "Pickup: " + q.pickup.name}] : []),
+      {lat: q.dest.lat, lon: q.dest.lon, color: "#f06ac0", label: "Drop-off: " + q.dest.name}] : []);
+    // bus: the route's shape and its stops (needed ones bright, the next one labelled)
+    const s = st.shift;
+    if (bMap && s && s.state !== "done") {
+      const key = s.route + s.headsign + s.trip_start;
+      if (shapeFor !== key) {
+        shapeFor = key;
+        const d = await api("api/shape");
+        busStops = d.stops || [];
+        bMap.shape(d.shape, "#" + s.color);
+      }
+      const need = {}; s.next.forEach(x => need[x.i] = x.need);
+      bMap.pins(busStops.map((p, i) => i < s.index ? null : {lat: p.lat, lon: p.lon, small: true, next: i === s.index,
+        color: i === s.index ? "#ff5d6c" : need[i] ? "#ffb547" : "#5d6685", label: p.name}).filter(Boolean));
+    }
+  } catch {}
+}
+// the transit agency's name, from its own feed
+const showAgency = d => { const n = (d.feed || {}).feed_publisher_name || ""; $("agencyName").textContent = n ? "· " + n : ""; };
+api("api/routes").then(d => { routes = d.routes; showAgency(d); drawRoutes(); });
+setMode(mode);
+setInterval(tick, 500); tick();
+
+// the car on the map, 10 times a second (only while a map is on screen)
+let poseBusy = false;
+async function poseTick() {
+  if (poseBusy) return;
+  const visible = [rMap, bMap].filter(mp => mp && mp.map.getContainer().offsetParent);
+  if (!visible.length) return;
+  poseBusy = true;
+  try {
+    const p = await fetch("api/pose", {cache: "no-store"}).then(r => r.json());
+    if (p.lat != null) visible.forEach(mp => mp.me(p.lat, p.lon, p.heading));
+  } catch {}
+  poseBusy = false;
+}
+setInterval(poseTick, 100);
+
+// ---------- music bar ----------
+const mmss = s => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+let musicCover = null;
+async function musicTick() {
+  const now = new Date();
+  $("mClock").textContent = now.getHours() + ":" + String(now.getMinutes()).padStart(2, "0");
+  let m;
+  try { m = await api("api/music"); } catch (e) { return; }
+  const has = !!m.title;
+  $("mTitle").textContent = has ? m.title : (m.aa ? "Android Auto" : "Nothing playing");
+  $("mArtist").textContent = has ? (m.artist || (m.source === "app" ? "App sound" : "BeamDeck"))
+    : (m.aa ? "Buttons control the phone's music" : "Play something in BeamDeck");
+  const playing = has && !m.paused;
+  $("mPlay").style.display = playing ? "none" : ""; $("mPause").style.display = playing ? "" : "none";
+  $("mTime").textContent = has && m.dur ? mmss(m.pos) + " / " + mmss(m.dur) : "";
+  $("mProg").style.width = has && m.dur ? Math.min(100, 100 * m.pos / m.dur) + "%" : "0";
+  if (m.cover !== musicCover) {
+    musicCover = m.cover;
+    $("mCover").style.visibility = m.cover ? "visible" : "hidden";
+    if (m.cover) $("mCover").src = "api/music/cover?k=" + encodeURIComponent(m.cover);
+  }
+}
+$("music").addEventListener("click", e => {
+  const b = e.target.closest("button[data-c]");
+  if (b) api("api/music", {cmd: b.dataset.c}).then(() => setTimeout(musicTick, 350)).catch(() => {});
+});
+setInterval(musicTick, 1000); musicTick();
+
+// Installed app: keep the tablet's screen on while the console is open
+let wake = null;
+async function keepAwake() {
+  try { if ("wakeLock" in navigator && document.visibilityState === "visible") wake = await navigator.wakeLock.request("screen"); } catch {}
+}
+document.addEventListener("visibilitychange", keepAwake);
+document.addEventListener("click", keepAwake, {once: true});
+keepAwake();
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+</script>
+</body>
+</html>

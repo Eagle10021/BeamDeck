@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="0" fill="#070a14"/>
+  <!-- bus front: body, windscreen, destination sign, lights, mirrors, wheels -->
+  <rect x="116" y="96" width="280" height="300" rx="44" fill="#e8273b"/>
+  <rect x="140" y="118" width="232" height="40" rx="10" fill="#14182c"/>
+  <text x="256" y="148" text-anchor="middle" font-family="sans-serif" font-weight="800" font-size="30" fill="#ffb547">111</text>
+  <rect x="140" y="172" width="232" height="120" rx="16" fill="#9fd3ff"/>
+  <path d="M140 262 L372 214 L372 292 L140 292 Z" fill="#7ab8ea"/>
+  <circle cx="170" cy="338" r="18" fill="#fff4c2"/>
+  <circle cx="342" cy="338" r="18" fill="#fff4c2"/>
+  <rect x="216" y="328" width="80" height="20" rx="6" fill="#14182c"/>
+  <rect x="96" y="150" width="20" height="58" rx="8" fill="#e8273b"/>
+  <rect x="396" y="150" width="20" height="58" rx="8" fill="#e8273b"/>
+  <rect x="142" y="392" width="54" height="34" rx="10" fill="#14182c"/>
+  <rect x="316" y="392" width="54" height="34" rx="10" fill="#14182c"/>
+</svg>
