@@ -15,6 +15,7 @@ import android.widget.TextView
 /** The phone side: where the helper is, the location permission, and whether everything is talking. */
 class MainActivity : Activity() {
     private lateinit var status: TextView
+    private lateinit var updateLine: TextView
     private val listener: () -> Unit = { showStatus() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,11 +38,19 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), 1) } })
         status = text("…", 16f).apply { gravity = Gravity.START }
         col.addView(status)
+        updateLine = text("Version ${Updater.installedVersion(this)}", 13f, "#9AA3C2")
+        col.addView(updateLine)
+        col.addView(Button(this).apply { text = "Check for updates"; setOnClickListener {
+            updateLine.text = "Checking…"
+            Updater.check(this@MainActivity, force = true) { updateLine.text = "Version ${Updater.installedVersion(this@MainActivity)} · $it" } } })
         col.addView(text("On the car: Android Auto → Settings → tap Version 10× → ⋮ Developer settings → Unknown sources (on). Then Real Routes shows up in the car's app list.", 13f, "#5D6685"))
         setContentView(ScrollView(this).apply { addView(col); setBackgroundColor(Color.parseColor("#070A14")) })
     }
 
-    override fun onStart() { super.onStart(); HelperClient.listeners.add(listener); HelperClient.start(this) }
+    override fun onStart() {
+        super.onStart(); HelperClient.listeners.add(listener); HelperClient.start(this)
+        Updater.check(this) { updateLine.text = "Version ${Updater.installedVersion(this)} · $it" }
+    }
     override fun onStop() { super.onStop(); HelperClient.listeners.remove(listener); HelperClient.stop() }
 
     private fun showStatus() {

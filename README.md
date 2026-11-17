@@ -298,6 +298,10 @@ The helper answers private and Tailscale addresses only. In Chrome on the tablet
 3. In **Android Auto settings**, tap **Version** ten times, then **⋮ → Developer settings → Unknown sources**, so Android Auto shows apps that didn't come from the Play Store.
 4. Start Android Auto (in BeamDeck: **Car → Android Auto**) and open **Real Routes** from its app list.
 
+**Updates:** from version 0.2.0 the app checks this repository's Releases when it opens (at most every 6 hours, or straight away with **Check for updates**) and offers new versions with **Update / Later / Skip this version**. The first update asks once for permission to install apps. Versions before 0.2.0 have no update check, so install 0.2.0 by hand.
+
+Publishing a new version: raise `versionCode` and `versionName` in `realroutes-auto/app/build.gradle.kts`, build it, and attach the APK to a release tagged `v<versionName>-realroutes` (e.g. `v0.2.0-realroutes`). The app only picks up non-draft, non-pre-release releases with that tag ending, and the APK must be signed with the same key as the installed one, or Android refuses the update.
+
 On BeamNG.Earth, the game's position can also be fed to the phone as its location with the [**Live GPS**](https://github.com/Leopri2008/BeamNG.Earth-LiveGPS) add-on: install its phone app, download its PC script, give the script's path under **Settings → Live GPS** in the BeamDeck window, and turn **Live GPS** on there; BeamDeck then runs the script.
 
 ### Riders' Pictures and Models
