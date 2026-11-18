@@ -45,6 +45,34 @@ if [ ! -x "$dhu/desktop-head-unit" ]; then
     rm -rf "$tmp"
 fi
 
+# Real Routes speech: Piper (an offline neural voice) in its own Python environment, and a voice model with
+# 904 speakers (one for the announcer, the others for riders). Piper needs Python 3.9-3.13; uv fetches one if needed.
+piper="$data/beamdeck/piper"
+if ! "$piper/bin/python" -c "import piper" 2>/dev/null; then
+    rm -rf "$piper"
+    if command -v uv >/dev/null 2>&1; then
+        uv venv -q --python 3.12 "$piper" && VIRTUAL_ENV="$piper" uv pip install -q piper-tts
+    else
+        py=""
+        for c in python3.12 python3.13 python3.11 python3.10 python3; do
+            if command -v "$c" >/dev/null 2>&1 && "$c" -c "import sys; sys.exit(not (3, 9) <= sys.version_info[:2] <= (3, 13))"; then py="$c"; break; fi
+        done
+        [ -n "$py" ] && "$py" -m venv "$piper" && "$piper/bin/pip" install -q piper-tts
+    fi || true
+    "$piper/bin/python" -c "import piper" 2>/dev/null ||
+        echo "Piper couldn't be installed (needs Python 3.9-3.13 or uv): Real Routes speaks on the phone or tablet instead."
+fi
+voices="$data/beamdeck/voices"; mkdir -p "$voices"
+hf=https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium
+for f in "en_US-libritts_r-medium.onnx 10bb85e071d616fcf4071f369f1799d0491492ab3c5d552ec19fb548fac13195" \
+         "en_US-libritts_r-medium.onnx.json b471dc60d2d8335e819c393d196d6fbf792817f40051257b269878505bc9afb3"; do
+    set -- $f
+    if ! echo "$2  $voices/$1" | sha256sum -c - >/dev/null 2>&1; then
+        curl -sfL -o "$voices/$1.part" "$hf/$1" && echo "$2  $voices/$1.part" | sha256sum -c - >/dev/null &&
+            mv "$voices/$1.part" "$voices/$1" || { rm -f "$voices/$1.part"; echo "The speech voice $1 couldn't be downloaded."; }
+    fi
+done
+
 systemctl --user daemon-reload
 echo "Installed. Turn the helper on with:  systemctl --user enable --now beamdeck"
 echo "Then open BeamDeck from the app launcher; BeamNG loads its side on the next start."

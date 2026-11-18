@@ -75,6 +75,7 @@ object HelperClient {
         if (exec != null) return
         val app = ctx.applicationContext
         post(app, "/api/theme", JSONObject().put("seed", DeviceColors.seedHex(app)))   // the tablet can match the phone's colours
+        Speaker.start(app)                           // speaks when the helper sends speech to the phone
         exec = Executors.newSingleThreadScheduledExecutor().also {
             it.scheduleWithFixedDelay({ poll(app) }, 0, 500, TimeUnit.MILLISECONDS)
         }
@@ -98,8 +99,9 @@ object HelperClient {
         val base = url(ctx)
         if (base.isEmpty()) { lastError = "No helper address set"; notifyAll(); return }
         try {
-            val st = JSONObject(String(get("$base/api/state")))
+            val st = JSONObject(String(get("$base/api/state?from=aa")))   // from=aa: the helper knows the phone can speak
             state = st
+            main.post { Speaker.onState(st.optJSONArray("pa"), st.optJSONObject("prefs")) }
             val v = st.optJSONObject("game")?.opt("routeVersion")
             if (v.toString() != routeVersion.toString()) {
                 routeVersion = v

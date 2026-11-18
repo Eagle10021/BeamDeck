@@ -25,6 +25,26 @@ OFF_ROUTE_M = 120
 JOLT, THROW = 3.0, 5.5  # m/s² horizontal: uncomfortable / standing passengers thrown
 
 
+# shared console settings (see Helper.set_prefs)
+PREF_DEFAULTS = {"v": 0, "mode": "bus", "speechOn": True, "speechVol": 0.9, "speakOn": "auto", "sayStops": True,
+                 "sayRiders": True, "sayNav": True, "voice": 0, "mapView": "chase", "mapStyle": "dark"}
+# Piper's en_US-libritts_r-medium has 904 speakers; these are the announcer voices offered in the settings
+N_SPEAKERS = 904
+VOICES = [92, 7, 136, 245, 351, 467, 580, 713]
+
+
+def spoken(t):
+    """Stop names as they're said: "Baseline Stn 2A" -> "Baseline Station 2 A", "A / B" -> "A and B"."""
+    t = re.sub(r"\s+/\s+", " and ", str(t))
+    t = re.sub(r"\bStn\b", "Station", t).replace("~", " ")
+    t = re.sub(r"\s+[A-H]$", "", t)
+    return re.sub(r"\s+(\d)([A-H])\b", r" \1 \2", t)
+
+
+def out_connected(g):
+    return time.time() - g.get("seen", 0) < 3
+
+
 def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
 
@@ -499,8 +519,23 @@ class Helper:
         import sys
         if HERE not in sys.path:
             sys.path.insert(0, HERE)
-        import rides, people
+        import rides, people, nav
         self.people = people
+        self.nav = nav.Nav()                                # turn-by-turn on the planned GPS route, for every client
+        self._nav_t = 0
+        # settings every client shares (mode, map, what is spoken and where), so the tablet, a PC browser and the
+        # Android Auto app stay in step; "v" goes up on every change
+        self._prefs_file = os.path.join(data_root, "prefs.json")
+        self.prefs = dict(PREF_DEFAULTS)
+        try:
+            self.prefs.update({k: v for k, v in json.load(open(self._prefs_file)).items() if k in PREF_DEFAULTS})
+        except Exception:
+            pass
+        # speech: BeamDeck sets on_say (Piper on the PC, played by its window through the car's sound) and
+        # pc_voice (whether that works right now); the Android Auto app counts as present while it polls
+        self.on_say = None
+        self.pc_voice = lambda: False
+        self.aa_seen = 0
         os.makedirs(data_root, exist_ok=True)
         self.rides = rides.Rides(self.send, data_root, announce=self.announce)
         self.pa, self._pa_id = [], 0                        # announcements for the tablet to speak
@@ -517,10 +552,51 @@ class Helper:
         threading.Thread(target=self.game_loop, daemon=True).start()
 
     def announce(self, text, kind="pa", who=None):
-        """Something for the tablet to say out loud: "stop"/"route" in the bus's voice, "rider" in a rider's."""
+        """Something to say out loud: "stop"/"route"/"app"/"nav" in the announcer's voice, "rider" in that rider's.
+        It goes to whichever device speaks (speech_to); the others only show it."""
         self._pa_id += 1
-        self.pa = (self.pa + [{"id": self._pa_id, "t": round(time.time(), 1), "text": text, "kind": kind,
-                               "who": who}])[-8:]
+        p = self.prefs
+        on = p["speechOn"] and (p["sayRiders"] if kind == "rider" else p["sayNav"] if kind == "nav" else p["sayStops"])
+        voice = VOICES[p["voice"] % len(VOICES)]
+        if kind == "rider":                                 # each rider keeps one of the model's other voices
+            h = 0
+            for ch in str(who or ""):
+                h = (h * 31 + ord(ch)) & 0x7fffffff
+            voice = h % N_SPEAKERS
+            if voice == VOICES[p["voice"] % len(VOICES)]:
+                voice = (voice + 1) % N_SPEAKERS
+        item = {"id": self._pa_id, "t": round(time.time(), 1), "text": text, "say": spoken(text), "kind": kind,
+                "who": who, "voice": voice, "ding": kind in ("stop", "route"), "quiet": not on, "to": self.speech_to()}
+        self.pa = (self.pa + [item])[-8:]
+        if on and item["to"] == "beamdeck" and self.on_say:
+            try:
+                self.on_say(item)
+            except Exception as e:
+                log("speech failed:", e)
+
+    def speech_to(self):
+        """Where announcements are spoken: the chosen place if it's there, else BeamDeck, the phone, the tablet."""
+        have = {"beamdeck": bool(self.pc_voice()), "aa": time.time() - self.aa_seen < 5, "tablet": True}
+        want = self.prefs.get("speakOn", "auto")
+        if want in have and have[want]:
+            return want
+        return next(k for k in ("beamdeck", "aa", "tablet") if have[k])
+
+    def set_prefs(self, body):
+        changed = False
+        for k, v in (body or {}).items():
+            if k == "speechVol" and isinstance(v, (int, float)) and not isinstance(v, bool):
+                v = round(min(1.5, max(0.0, float(v))), 2)
+            if k in PREF_DEFAULTS and k != "v" and type(v) is type(PREF_DEFAULTS[k]) and v != self.prefs.get(k):
+                if k == "speakOn" and v not in ("auto", "beamdeck", "aa", "tablet"):
+                    continue
+                self.prefs[k] = v
+                changed = True
+        if changed:
+            self.prefs["v"] = self.prefs.get("v", 0) + 1
+            with open(self._prefs_file, "w") as f:
+                json.dump(self.prefs, f)
+        return self.prefs
 
     def routes_data(self):
         """The routes on offer: the map's own bus lines on a regular map, the transit agency's on BeamNG.Earth."""
@@ -595,7 +671,7 @@ class Helper:
     def send(self, cmds):
         for c in cmds:
             try:
-                self.sock.sendto(json.dumps(c, separators=(",", ":")).encode(), ("127.0.0.1", GAME_PORT))
+                self.sock.sendto(json.dumps(c, separators=(",", ":"), ensure_ascii=False).encode("utf-8"), ("127.0.0.1", GAME_PORT))   # raw UTF-8: the game shows \\u escapes as typed
             except OSError as e:
                 log("send failed:", e)
 
@@ -609,6 +685,11 @@ class Helper:
             with self.lock:
                 if m.get("type") == "pose":
                     self.game = m | {"seen": time.time()}
+                    if time.time() - self._nav_t > 0.25:    # directions: 4 times a second is plenty
+                        self._nav_t = time.time()
+                        for words in self.nav.update(m.get("lat"), m.get("lon"), m.get("speed", 0),
+                                                     quiet_arrive=self.shift_running()):
+                            self.announce(words, "nav")
                     if self.shift:
                         self.send(self.shift.update(m["lat"], m["lon"], m.get("speed", 0), bool(m.get("doors")),
                                                     m.get("gx", 0), m.get("gy", 0)))
@@ -626,6 +707,7 @@ class Helper:
                     self.route = {"version": m.get("version"), "points": m.get("points") or [],
                                   "dist": m.get("dist"), "dur": m.get("dur"), "steps": m.get("steps") or []}
                     self.rides.on_route(self.route)
+                    self.nav.set_route(self.route)
                 elif m.get("type") == "hello":
                     self.game["seen"] = time.time()
                     self.game["earth"] = m.get("earth")
@@ -787,6 +869,10 @@ class Helper:
                             "agency": "stock" if self.flat else self.agency,
                             "key": f"stock:{self.stock.level}:{self._stock_key[1]}" if self.flat and self.stock
                             else ("stock:none" if self.flat else self.agency)},
+                   "nav": self.nav.view if out_connected(g) else None,
+                   "prefs": self.prefs,
+                   "speech": {"to": self.speech_to(), "beamdeck": bool(self.pc_voice()),
+                              "aa": time.time() - self.aa_seen < 5, "voices": len(VOICES)},
                    "pa": self.pa, "page": self.page_version()}
         return out
 
@@ -862,6 +948,8 @@ class Helper:
                 f, ctype = static[path]
                 return 200, open(os.path.join(HERE, f), "rb").read(), ctype
             if path == "/api/state":
+                if qs.get("from") == "aa":                    # the Android Auto app: it can speak
+                    self.aa_seen = time.time()
                 return js(self.state())
             if path == "/api/routes":
                 data = self.routes_data()
@@ -887,6 +975,15 @@ class Helper:
                     with open(self._theme_file, "w") as f:
                         json.dump(self.theme, f)
                 return js({"ok": True})
+            if path == "/api/prefs":
+                with self.lock:
+                    return js(self.set_prefs(body))
+            if path == "/api/say":                          # the settings' Test button: through wherever speech goes
+                with self.lock:
+                    self.announce("Next stop: Baseline Station.", "stop")
+                    self.announce("In 300 metres, turn right onto Merivale Road.", "nav")
+                    self.announce("Hi! Thanks for picking me up.", "rider", "Test rider")
+                return js({"ok": True, "to": self.speech_to()})
             if path == "/api/cmd":
                 self.command(body.get("cmd"))
                 return js({"ok": True})

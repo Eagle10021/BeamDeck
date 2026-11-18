@@ -141,6 +141,22 @@
   .ov { position: absolute; z-index: 4; background: var(--glass); border: 1px solid var(--line); border-radius: 16px;
     color: var(--text); pointer-events: none; }
   .ov-place { top: 62px; left: 12px; padding: 8px 14px; display: none; }
+  /* turn-by-turn card, like the phone's Android Auto card: the arrow, how far, what to do, and the turn after */
+  .ov-turn { top: 62px; left: 12px; display: none; padding: 0; overflow: hidden; min-width: 300px; max-width: min(480px, 72%);
+    background: var(--md-primary-container); color: var(--md-on-primary-container); border: 0; border-radius: 24px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.45); transform-origin: 0 0; }
+  .ov-turn.on { display: block; animation: m3-pop var(--d-spatial) var(--m3-bouncy) backwards; }
+  .ov-turn .tmain { display: flex; gap: 14px; align-items: center; padding: 14px 20px 14px 14px; }
+  .ov-turn .tmain svg { width: 68px; height: 68px; flex: none; }
+  .ov-turn .td { font-size: 36px; font-weight: 800; line-height: 1; letter-spacing: -.5px; }
+  .ov-turn .tc { font-size: 19px; font-weight: 600; margin-top: 5px; display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden; }
+  .ov-turn .tthen { display: none; gap: 8px; align-items: center; padding: 8px 20px; font-size: 15px; font-weight: 700;
+    background: color-mix(in srgb, var(--md-on-primary-container) 14%, transparent); }
+  .ov-turn .tthen.on { display: flex; }
+  .ov-turn .tthen svg { width: 26px; height: 26px; }
+  .ov-turn.bump .tmain svg { animation: m3-squish var(--d-spatial) var(--m3-bouncy); }
+  .voicebox input[type=range] { width: 100%; accent-color: var(--accent); margin-top: 8px; }
   .ov-place b { display: block; font-size: 19px; } .ov-place span { font-size: 13px; color: var(--muted); }
   .ov-speed { left: 12px; bottom: 34px; padding: 10px 16px; display: flex; gap: 16px; align-items: center; }
   .ov-speed b { font-size: 40px; font-weight: 800; line-height: 1; } .ov-speed small { display: block; font-size: 12px; color: var(--muted); }
@@ -345,12 +361,19 @@
 </div>
 
 <div class="voicebox" id="voiceBox">
-  <h3>Announcements</h3>
+  <h3>Speech</h3>
+  <label>Speech <input type="checkbox" id="vOn"></label>
+  <label style="display:block">Speak on<select id="vWhere" style="margin-top:8px">
+    <option value="auto">Automatic</option><option value="beamdeck">BeamDeck (the car's sound on the PC)</option>
+    <option value="aa">The phone (Android Auto)</option><option value="tablet">This tablet</option></select></label>
+  <label style="display:block">Volume <b id="vVolTxt"></b><input type="range" id="vVol" min="0" max="1.5" step="0.05"></label>
   <label>Stop and route announcements <input type="checkbox" id="vStops"></label>
+  <label>Directions <input type="checkbox" id="vNav"></label>
   <label>Riders talk out loud <input type="checkbox" id="vRiders"></label>
-  <label style="display:block">Announcer voice<select id="vVoice" style="margin-top:8px"></select></label>
+  <label style="display:block" id="vPcRow">Announcer voice<select id="vPc" style="margin-top:8px"></select></label>
+  <label style="display:block" id="vTabRow">Announcer voice (this tablet)<select id="vVoice" style="margin-top:8px"></select></label>
   <div class="rbtns" style="grid-template-columns:1fr;margin-top:10px"><button class="declinebtn" id="vTest">Test</button></div>
-  <div class="hint">Spoken by this tablet. Riders get their own voice and pitch.</div>
+  <div class="hint" id="vHint">Riders get their own voices.</div>
 </div>
 <div class="updating" id="updating">Updating…</div>
 <div class="flash" id="flash"></div>
@@ -541,7 +564,7 @@ function ding() {
       const o = audio.createOscillator(), g = audio.createGain();
       o.frequency.value = k ? 660 : 880; o.connect(g); g.connect(audio.destination);
       g.gain.setValueAtTime(.0001, audio.currentTime + d);
-      g.gain.exponentialRampToValueAtTime(.3, audio.currentTime + d + .01);
+      g.gain.exponentialRampToValueAtTime(Math.max(.0002, .3 * Math.min(1, prefs ? prefs.speechVol : .9)), audio.currentTime + d + .01);
       g.gain.exponentialRampToValueAtTime(.0001, audio.currentTime + d + .5);
       o.start(audio.currentTime + d); o.stop(audio.currentTime + d + .55);
     });
@@ -657,15 +680,18 @@ function RRMap(el, btn) {
   ctl.append(bView, bStyle); el.parentElement.appendChild(ctl);
   const labels = () => {
     bView.textContent = VIEWS.find(v => v[0] === mapView)[1];
-    bStyle.textContent = mapFlat ? "🗺 Level map" : "🗺 " + MAP_STYLES.find(v => v[0] === mapStyle)[1];
+    bStyle.style.display = mapFlat ? "none" : "";          // a regular map has only its own road map: nothing to pick
+    bStyle.textContent = "🗺 " + MAP_STYLES.find(v => v[0] === mapStyle)[1];
   };
   bView.onclick = () => {
     mapView = VIEWS[(VIEWS.findIndex(v => v[0] === mapView) + 1) % VIEWS.length][0]; savePref("rrMapView", mapView);
+    setPrefs({mapView});
     allMaps.forEach(x => x.applyView());
   };
   bStyle.onclick = () => {
     if (mapFlat) return;                      // a regular map has only its own road map
     mapStyle = MAP_STYLES[(MAP_STYLES.findIndex(v => v[0] === mapStyle) + 1) % MAP_STYLES.length][0]; savePref("rrMapStyle", mapStyle);
+    setPrefs({mapStyle});
     allMaps.forEach(x => x.applyStyle());
   };
   labels();
@@ -673,6 +699,9 @@ function RRMap(el, btn) {
   const oPlace = ov("ov-place", "<b></b><span></span>");
   const oSpeed = ov("ov-speed", '<div><b>0</b><small>KM/H</small></div><div class="comp"><i></i></div>');
   const oNav = ov("ov-nav", "<b></b><span></span>");
+  const oTurn = ov("ov-turn", '<div class="tmain"><svg viewBox="0 0 48 48"></svg><div><div class="td"></div><div class="tc"></div></div></div>' +
+    '<div class="tthen"><span>Then</span><svg viewBox="0 0 48 48"></svg><span class="tt"></span></div>');
+  let turnKey = null;
   const flagEl = document.createElement("div"); flagEl.className = "flag"; flagEl.textContent = "🏁";
   const flag = new maplibregl.Marker({element: flagEl, anchor: "bottom-left"});
   const meEl = document.createElement("div"); meEl.className = "meicon"; meEl.innerHTML = "<div></div>";
@@ -743,6 +772,8 @@ function RRMap(el, btn) {
   m.on("dragstart", () => { follow = false; lastTouch = Date.now(); btn.classList.add("on"); });
   btn.onclick = () => { follow = true; btn.classList.remove("on"); };
   const set = (id, pts) => { if (ready && m.getSource(id)) m.getSource(id).setData(line(pts)); };
+  // a map built or left while its page was hidden has the wrong size when the page comes back: follow the box
+  new ResizeObserver(() => { if (el.clientWidth && el.clientHeight) m.resize(); }).observe(el);
   // heading up / chase: the map turns with the car and the car sits low on the screen, so more road shows ahead
   const camera = (lat, lon, hd, dur, easing) => {
     const h = el.clientHeight || 600;
@@ -838,6 +869,23 @@ function RRMap(el, btn) {
       const end = data.route[data.route.length - 1];
       if (end) flag.setLngLat([end[1], end[0]]).addTo(m); else flag.remove();
     },
+    /** The next turn (the helper's st.nav, the same one the phone shows), or null to hide the card. */
+    turn(n) {
+      oTurn.classList.toggle("on", !!n);
+      oPlace.style.visibility = n ? "hidden" : "";              // the card names the road instead
+      if (!n) { turnKey = null; return; }
+      const key = n.icon + n.cue;
+      if (key !== turnKey) {                                      // a new turn: the arrow squishes in
+        turnKey = key;
+        oTurn.querySelector(".tmain svg").innerHTML = arrow(n.icon);
+        oTurn.querySelector(".tc").textContent = n.cue;
+        oTurn.classList.remove("bump"); void oTurn.offsetWidth; oTurn.classList.add("bump");
+      }
+      oTurn.querySelector(".td").textContent = n.distText;
+      const th = oTurn.querySelector(".tthen");
+      th.classList.toggle("on", !!n.then);
+      if (n.then) { th.querySelector("svg").innerHTML = arrow(n.then.icon); th.querySelector(".tt").textContent = n.then.cue; }
+    },
     hud(g, dest) {
       const pl = g.place || {};
       oPlace.style.display = pl.street || pl.place ? "block" : "none";
@@ -887,12 +935,19 @@ const bMap = RRMap($("bMap"), $("bRecenter"));
 let routeVer = null, shapeFor = null, busStops = [];
 let routeShown = false;                       // a route is drawn: its flag marks where the car is heading
 let emgKey = null;                            // the emergency ride the map is showing
+let routeBusy = false;
 async function updateRoute(v) {
-  if (v === routeVer) return;
-  routeVer = v;
-  const r = await api("api/route");
-  routeShown = (r.points || []).length > 1;
-  [rMap, bMap].forEach(mp => mp && mp.route(r.points));
+  if (v === routeVer || routeBusy) return;
+  routeBusy = true;
+  try {
+    const r = await api("api/route");
+    // only counted as drawn once the route that came back is the one asked for; otherwise the next tick tries
+    // again (a failed request used to leave the old line up until the page was reopened)
+    if (String(r.version) !== String(v)) return;
+    routeVer = v;
+    routeShown = (r.points || []).length > 1;
+    [rMap, bMap].forEach(mp => mp && mp.route(r.points));
+  } catch {} finally { routeBusy = false; }
 }
 $("busView").onclick = e => {
   const b = e.target.closest("button"); if (!b) return;
@@ -905,8 +960,9 @@ $("busView").onclick = e => {
 
 // ---------- mode: bus or rides ----------
 let mode = "bus"; try { mode = localStorage.getItem("rrMode") || "bus"; } catch {}
-function setMode(m) {
+function setMode(m, share = true) {
   mode = m; try { localStorage.setItem("rrMode", m); } catch {}
+  if (share && prefs && prefs.mode !== m) setPrefs({mode: m});        // the other screens follow
   document.querySelectorAll("#modes button").forEach(b => b.classList.toggle("on", b.dataset.m === m));
   if (m === "rides") { show("rides"); setTimeout(() => rMap && rMap.resize(), 50); }
   else show(lastShift && lastShift.state !== "done" ? "drive" : "pick");
@@ -1200,6 +1256,7 @@ async function tick() {
     lastRaw = raw;
     const st = JSON.parse(raw);
     checkPage(st.page);
+    applyPrefs(st.prefs, st.speech);
     speakNew(st.pa);
     lastShift = st.shift;
     document.body.classList.toggle("driving", !!(st.shift && st.shift.state !== "done") && mode === "bus");
@@ -1212,7 +1269,8 @@ async function tick() {
     // (the car's position comes from poseTick, 10 times a second)
     const rq = st.rides && st.rides.req;
     const rDest = rq ? (st.rides.state === "on_trip" ? "Drop-off: " + rq.dest.name : "Pickup: " + rq.pickup.name) : null;
-    if (rMap) rMap.hud(g, rDest);
+    if (rMap) { rMap.hud(g, rDest); rMap.turn(st.nav); }
+    if (bMap) bMap.turn(st.nav);
     if (bMap) bMap.hud(g, st.shift && st.shift.next[0] ? "Next stop: " + st.shift.next[0].name : null);
     if (g.connected) updateRoute(g.routeVersion);
     // rides: pickup / drop-off pins
@@ -1297,6 +1355,7 @@ function sayNow(a) {
     const v = voices.find(x => x.name === voiceCfg.voice); if (v) u.voice = v;
     u.rate = 0.95;
   }
+  u.volume = Math.min(1, prefs ? prefs.speechVol : 0.9);
   if (a.kind === "stop" || a.kind === "route") { ding(); setTimeout(() => tts.speak(u), 650); }
   else tts.speak(u);
 }
@@ -1308,19 +1367,72 @@ function speakNew(pa) {
     if (a.id <= lastPa) continue;
     lastPa = a.id;
     if (Date.now() / 1000 - a.t > 20) continue;
-    if (a.kind === "rider" ? !voiceCfg.riders : !voiceCfg.stops) continue;
-    sayNow(a);
+    // only when speech goes to the tablet; a console opened on the PC itself leaves speaking to BeamDeck
+    if (a.quiet || a.to !== "tablet" || ON_PC) continue;
+    sayNow({...a, text: a.say || a.text});
   }
 }
-const syncSpk = () => $("spkBtn").classList.toggle("on", voiceCfg.stops || voiceCfg.riders);
-$("vStops").checked = voiceCfg.stops; $("vRiders").checked = voiceCfg.riders; syncSpk();
+
+// ---------- shared settings: the helper keeps them, so every screen (tablet, PC, phone) matches ----------
+const ON_PC = ["127.0.0.1", "localhost"].includes(location.hostname);
+let prefs = null, speech = null;
+const SPEAK_NAMES = {beamdeck: "BeamDeck on the PC", aa: "the phone (Android Auto)", tablet: "this tablet"};
+function setPrefs(body) {
+  if (prefs) Object.assign(prefs, body);
+  return api("api/prefs", body).then(p => { prefs = null; applyPrefs(p, speech); }).catch(() => {});
+}
+function applyPrefs(p, sp) {
+  if (sp) speech = sp;
+  if (!p) return;
+  const fresh = !prefs || prefs.v !== p.v;
+  prefs = p;
+  if (fresh) {
+    if (p.mode && p.mode !== mode) setMode(p.mode, false);
+    let restyle = false, review = false;
+    if (p.mapView && p.mapView !== mapView) { mapView = p.mapView; savePref("rrMapView", mapView); review = true; }
+    if (p.mapStyle && p.mapStyle !== mapStyle) { mapStyle = p.mapStyle; savePref("rrMapStyle", mapStyle); restyle = true; }
+    if (review) allMaps.forEach(x => x.applyView());
+    if (restyle && !mapFlat) allMaps.forEach(x => x.applyStyle());
+  }
+  // the speech box shows the shared settings (not while a slider is being dragged)
+  $("vOn").checked = p.speechOn; $("vWhere").value = p.speakOn; $("vStops").checked = p.sayStops;
+  $("vNav").checked = p.sayNav; $("vRiders").checked = p.sayRiders;
+  if (document.activeElement !== $("vVol")) $("vVol").value = p.speechVol;
+  $("vVolTxt").textContent = Math.round(+$("vVol").value * 100) + "%";
+  if (speech && $("vPc").options.length !== speech.voices)
+    $("vPc").innerHTML = Array.from({length: speech.voices}, (_, i) => `<option value="${i}">Voice ${i + 1}</option>`).join("");
+  $("vPc").value = p.voice;
+  const to = speech ? speech.to : "tablet";
+  $("vPcRow").style.display = to === "beamdeck" ? "" : "none";
+  $("vTabRow").style.display = to === "tablet" ? "" : "none";
+  $("vHint").textContent = !p.speechOn ? "Speech is off." : `Speaking on ${SPEAK_NAMES[to]}.` +
+    (p.speakOn !== "auto" && p.speakOn !== to ? ` (${SPEAK_NAMES[p.speakOn]} isn't available right now.)` : "") + " Riders get their own voices.";
+  $("spkBtn").classList.toggle("on", p.speechOn);
+}
 $("spkBtn").onclick = e => { e.stopPropagation(); $("voiceBox").classList.toggle("on"); };
 document.addEventListener("click", e => { if (!e.target.closest("#voiceBox")) $("voiceBox").classList.remove("on"); });
-$("vStops").onchange = e => { voiceCfg.stops = e.target.checked; savePref("rrSayStops", e.target.checked ? "1" : "0"); syncSpk(); };
-$("vRiders").onchange = e => { voiceCfg.riders = e.target.checked; savePref("rrSayRiders", e.target.checked ? "1" : "0"); syncSpk(); };
+$("vOn").onchange = e => setPrefs({speechOn: e.target.checked});
+$("vWhere").onchange = e => setPrefs({speakOn: e.target.value});
+$("vStops").onchange = e => setPrefs({sayStops: e.target.checked});
+$("vNav").onchange = e => setPrefs({sayNav: e.target.checked});
+$("vRiders").onchange = e => setPrefs({sayRiders: e.target.checked});
+$("vPc").onchange = e => setPrefs({voice: +e.target.value});
+$("vVol").oninput = e => { $("vVolTxt").textContent = Math.round(+e.target.value * 100) + "%"; };
+$("vVol").onchange = e => setPrefs({speechVol: +e.target.value});
 $("vVoice").onchange = e => { voiceCfg.voice = e.target.value; savePref("rrVoice", e.target.value); };
-$("vTest").onclick = () => { sayNow({text: "Next stop: Baseline Station.", kind: "stop"});
-  setTimeout(() => sayNow({text: "Hi! Thanks for picking me up.", kind: "rider", who: "Test rider"}), 3500); };
+$("vTest").onclick = () => api("api/say", {});      // said wherever speech goes right now
+
+// ---------- the turn card's arrows (the same shapes as the phone's) ----------
+const ARROWS = {
+  arrive: "M14,42 L14,8 L36,14 L14,22", depart: "M24,42 L24,14 M14,24 L24,14 L34,24 M14,8 L34,8",
+  left: "M32,42 L32,22 Q32,16 26,16 L10,16 M18,8 L10,16 L18,24", right: "M16,42 L16,22 Q16,16 22,16 L38,16 M30,8 L38,16 L30,24",
+  merge: "M16,42 L16,30 L24,20 L24,8 M32,42 L32,30 L24,20 M16,16 L24,8 L32,16",
+  roundabout: "M24,42 L24,30 M24,30 A8,8 0 1,1 32,22 L40,14 M33,12 L40,14 L38,21",
+  sharp_left: "M34,8 L34,28 L12,40 M12,28 L12,40 L24,42", sharp_right: "M14,8 L14,28 L36,40 M36,28 L36,40 L24,42",
+  slight_left: "M30,42 L30,26 L16,10 M16,22 L16,10 L28,10", slight_right: "M18,42 L18,26 L32,10 M32,22 L32,10 L20,10",
+  straight: "M24,42 L24,8 M14,18 L24,8 L34,18", uturn: "M32,42 L32,18 Q32,8 22,8 Q12,8 12,18 L12,30 M5,23 L12,30 L19,23",
+};
+const arrow = k => `<path d="${ARROWS[k] || ARROWS.straight}" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`;
 
 // ---------- M3E tab indicators ----------
 // Every .toggle / .modes row gets a pill behind its selected button. Whatever code marks a button "on", the pill

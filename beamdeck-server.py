@@ -612,7 +612,7 @@ def udp_tx():
                "file": f"/beamdeck_media/{key}.webm" if ready else "",
                "pos": round(player_pos(), 3), "paused": player["paused"]}
         try:
-            udp.sendto(json.dumps(msg).encode(), ("127.0.0.1", GAME_PORT))
+            udp.sendto(json.dumps(msg, ensure_ascii=False).encode("utf-8"), ("127.0.0.1", GAME_PORT))
         except Exception:
             pass
         time.sleep(0.2)
@@ -2017,9 +2017,124 @@ def routes_start():
         ROUTES = realroutes_helper.Helper(os.path.join(DATA_DIR, "realroutes"), gtfs=config.get("routes_gtfs") or None,
                                           agency=config.get("routes_agency") or "octranspo")
         ROUTES.rides.on_people = routes_standees     # new or changed riders' pictures: into the game straight away
+        ROUTES.on_say = routes_say                   # announcements spoken here, through the car's sound
+        ROUTES.pc_voice = lambda: tts_available() and bool(windows)
         routes_standees()                            # (the helper has just written the built-in people's cards)
     except Exception as e:
         print("Real Routes is off:", e, flush=True)
+
+
+# ---------------------------------------------------------------- Real Routes speech (Piper, on this PC)
+# Announcements and directions are spoken by Piper (an offline neural voice) in its own Python environment, which
+# install.sh / install.ps1 set up; the newest BeamDeck window plays the clip through the car's sound. Without Piper
+# the console falls back to the phone (Android Auto) or the tablet's own voice.
+def piper_paths():
+    if WINDOWS:
+        py = config.get("tts_python") or os.path.join(DATA_DIR, "piper", "Scripts", "python.exe")
+    else:
+        py = config.get("tts_python") or os.path.join(DATA_DIR, "piper", "bin", "python")
+    model = config.get("tts_model") or ""
+    if not model:
+        vdir = os.path.join(DATA_DIR, "voices")
+        found = sorted(f for f in os.listdir(vdir) if f.endswith(".onnx")) if os.path.isdir(vdir) else []
+        model = os.path.join(vdir, found[0]) if found else ""
+    return py, model
+
+
+TTS = {"proc": None, "ready": False, "failed": False, "items": {}, "lock": threading.Lock()}
+SAY_DIR = os.path.join(CACHE, "say")
+
+
+def tts_available():
+    py, model = piper_paths()
+    return not TTS["failed"] and os.path.exists(py) and bool(model) and os.path.exists(model)
+
+
+def tts_proc():
+    """The Piper worker, started on first use and kept running (loading the voice takes most of a second)."""
+    with TTS["lock"]:
+        p = TTS["proc"]
+        if p and p.poll() is None:
+            return p
+        py, model = piper_paths()
+        os.makedirs(SAY_DIR, exist_ok=True)
+        try:
+            p = subprocess.Popen([py, os.path.join(HERE, "realroutes", "tts_worker.py"), model],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                                 encoding="utf-8", bufsize=1,
+                                 **({"creationflags": 0x08000000} if WINDOWS else {}))
+        except OSError as e:
+            print("Real Routes speech is off:", e, flush=True)
+            TTS["failed"] = True
+            return None
+        TTS["proc"] = p
+        threading.Thread(target=tts_read, args=(p,), daemon=True).start()
+        return p
+
+
+def tts_read(p):
+    for line in p.stdout:
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if r.get("ready"):
+            TTS["ready"] = True
+            continue
+        item = TTS["items"].get(r.get("id"))
+        if not item:
+            continue
+        if not r.get("ok"):
+            print("Real Routes speech failed:", r.get("error"), flush=True)
+            continue
+        w = windows[-1] if windows else None              # the active window plays it
+        if w:
+            try:
+                w.send(json.dumps({"type": "say", "id": item["id"], "kind": item["kind"], "who": item.get("who"),
+                                   "text": item["text"], "ding": item.get("ding", False),
+                                   "vol": ROUTES.prefs.get("speechVol", 0.9) if ROUTES else 0.9,
+                                   "url": f"/say/{item['id']}.wav"}))
+            except Exception:
+                pass
+    TTS["ready"] = False
+
+
+def routes_say(item):
+    """The Real Routes helper has something to say and BeamDeck is where speech goes: make the clip."""
+    p = tts_proc()
+    if not p:
+        return
+    TTS["items"][item["id"]] = item
+    for old in [k for k in TTS["items"] if k <= item["id"] - 20]:       # keep the last few clips only
+        TTS["items"].pop(old, None)
+        try:
+            os.remove(os.path.join(SAY_DIR, f"{old}.wav"))
+        except OSError:
+            pass
+    try:
+        p.stdin.write(json.dumps({"id": item["id"], "text": item.get("say") or item["text"], "voice": item.get("voice", 0),
+                                  "rate": 1.05 if item["kind"] == "rider" else 1.0,
+                                  "out": os.path.join(SAY_DIR, f"{item['id']}.wav")}) + "\n")
+        p.stdin.flush()
+    except OSError as e:
+        print("Real Routes speech failed:", e, flush=True)
+
+
+def open_routes_window():
+    """Real Routes' console in its own app window, in the same browser profile as BeamDeck's window."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("bd_launch", os.path.join(HERE, "beamdeck-launch.py"))
+    launch = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launch)
+    browser = launch.find_browser()
+    if not browser:
+        return False
+    subprocess.Popen([browser, f"--app=http://127.0.0.1:{PORT}/routes/", "--user-data-dir=" + os.path.join(DATA_DIR, "browser-profile"),
+                      "--window-size=1280,800", "--no-first-run", "--no-default-browser-check",
+                      "--autoplay-policy=no-user-gesture-required"],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     **({"creationflags": 0x08000000} if WINDOWS else {"start_new_session": True}))
+    return True
 
 
 # ---------------------------------------------------------------- HTTP
@@ -2069,6 +2184,19 @@ class H(BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
         if u.path == "/routes" or u.path.startswith("/routes/"):
             return self.routes("GET", u, q, {})
+        m = re.fullmatch(r"/say/(\d+)\.wav", u.path)          # a Real Routes announcement for the window to play
+        if m:
+            f = os.path.join(SAY_DIR, m.group(1) + ".wav")
+            if not os.path.exists(f):
+                return self.json({"error": "gone"}, 404)
+            data = open(f, "rb").read()
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/wav")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+            return
 
         if self.headers.get("Upgrade", "").lower() == "websocket":
             key = self.headers.get("Sec-WebSocket-Key", "")
@@ -2238,6 +2366,8 @@ class H(BaseHTTPRequestHandler):
             return self.json(config_update(body))
         if u.path.startswith("/routes/"):
             return self.routes("POST", u, {}, body)
+        if u.path == "/open-routes":                 # the Bus tab's "Open Real Routes"
+            return self.json({"ok": open_routes_window()})
         self.json({"error": "not found"}, 404)
 
     def image(self, data):

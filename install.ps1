@@ -62,6 +62,37 @@ if ($AndroidAuto -and -not (Test-Path "$data\dhu\desktop-head-unit.exe")) {
     Remove-Item $zip
 }
 
+# Real Routes speech: Piper (an offline neural voice) in its own Python environment, and a voice model with
+# 904 speakers (one for the announcer, the others for riders). Piper needs Python 3.9-3.13.
+$piperPy = "$data\piper\Scripts\python.exe"
+if (-not ((Test-Path $piperPy) -and (& $piperPy -c "import piper" 2>$null; $LASTEXITCODE -eq 0))) {
+    $baseExe = $null; $baseArgs = @()
+    if (Get-Command py.exe -ErrorAction SilentlyContinue) {
+        foreach ($v in "3.12", "3.13", "3.11", "3.10") { & py.exe "-$v" -c "1" 2>$null; if ($LASTEXITCODE -eq 0) { $baseExe = "py.exe"; $baseArgs = @("-$v"); break } }
+    }
+    if (-not $baseExe -and $py) { $baseExe = $py -replace 'pythonw\.exe$', 'python.exe' }
+    if ($baseExe) {
+        if (Test-Path "$data\piper") { Remove-Item "$data\piper" -Recurse -Force }
+        & $baseExe @baseArgs -m venv "$data\piper"
+        & $piperPy -m pip install -q piper-tts
+    }
+    & $piperPy -c "import piper" 2>$null
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Piper couldn't be installed (needs Python 3.9-3.13): Real Routes speaks on the phone or tablet instead." }
+}
+New-Item -ItemType Directory -Force "$data\voices" | Out-Null
+$hf = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium"
+$voiceFiles = @{ "en_US-libritts_r-medium.onnx" = "10bb85e071d616fcf4071f369f1799d0491492ab3c5d552ec19fb548fac13195";
+                 "en_US-libritts_r-medium.onnx.json" = "b471dc60d2d8335e819c393d196d6fbf792817f40051257b269878505bc9afb3" }
+foreach ($f in $voiceFiles.Keys) {
+    $out = "$data\voices\$f"
+    if ((Test-Path $out) -and (Get-FileHash $out -Algorithm SHA256).Hash.ToLower() -eq $voiceFiles[$f]) { continue }
+    try {
+        Invoke-WebRequest "$hf/$f" -OutFile "$out.part"
+        if ((Get-FileHash "$out.part" -Algorithm SHA256).Hash.ToLower() -ne $voiceFiles[$f]) { throw "checksum" }
+        Move-Item "$out.part" $out -Force
+    } catch { Remove-Item "$out.part" -ErrorAction SilentlyContinue; Write-Warning "The speech voice $f couldn't be downloaded." }
+}
+
 foreach ($t in "ffmpeg", "yt-dlp") { if (-not (Get-Command $t -ErrorAction SilentlyContinue)) { Write-Warning "$t isn't on PATH (winget install Gyan.FFmpeg yt-dlp.yt-dlp)" } }
 if (-not (Test-Path "$app\svcl.exe")) { Write-Host "Optional: put NirSoft's svcl.exe in $app and install VB-CABLE for app sound through the car." }
 Write-Host "Installed. Open BeamDeck from the Start menu; BeamNG loads its side on the next start."

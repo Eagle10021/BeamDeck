@@ -1474,6 +1474,38 @@
     <!-- ======================= SETTINGS ======================= -->
     <!-- ======================= BUS: signs on the city bus (Real Routes helper) ======================= -->
     <section id="tab-bus">
+      <!-- Real Routes: its console in a big window, and where / how loud its announcements and directions are spoken -->
+      <div class="card" id="rrCard">
+        <div class="card-head">
+          <h2 class="card-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 18l-6 3V6l6-3 6 3 6-3v15l-6 3-6-3z"></path>
+              <path d="M9 3v15M15 6v15"></path>
+            </svg>
+            Real Routes
+          </h2>
+        </div>
+        <div class="hint" id="rrStatus">Bus shifts and rides on real routes, with turn-by-turn directions on a big map.</div>
+        <div class="row" style="margin-top:10px"><button id="rrOpen" class="primary">Open Real Routes</button></div>
+        <div class="toggles" id="rrSpeech" style="margin-top:12px">
+          <button data-v="on">Speech on</button>
+          <button data-v="off">Speech off</button>
+        </div>
+        <label class="field" style="margin-top:10px">Speak on
+          <select id="rrSpeakOn">
+            <option value="auto">Automatic (BeamDeck, then the phone, then the tablet)</option>
+            <option value="beamdeck">BeamDeck: through the car's sound on this PC</option>
+            <option value="aa">The phone (Android Auto)</option>
+            <option value="tablet">The tablet / browser</option>
+          </select>
+        </label>
+        <div class="row" style="margin-top:10px;align-items:center;gap:10px">
+          <span class="hint" style="margin:0;min-width:96px">Speech volume</span>
+          <input id="rrVol" type="range" min="0" max="1.5" step="0.05" value="0.9" style="flex:1">
+          <span id="rrVolTxt" class="slider-meter" style="min-width:38px;padding:2px 4px;font-size:10.5px">90%</span>
+        </div>
+      </div>
       <!-- Bus signs: the city bus's destination sign and next-stop screen (Real Routes helper) -->
       <div class="card" id="busCard">
         <div class="card-head">
@@ -1830,8 +1862,28 @@
     $("busRealApply").onclick = () => { if ($("busRealPat").value) busSend({ mode: "route", pattern: $("busRealPat").value }) }
     $("busPrev").onclick = () => busApi("sign/step", { delta: -1 }).then(r => { busMsg(r); busPoll() })
     $("busNextBtn").onclick = () => busApi("sign/step", { delta: 1 }).then(r => { busMsg(r); busPoll() })
+    // Real Routes card: the settings live in the helper, shared with the tablet, a PC browser and the phone
+    const rrSet = body => busApi("prefs", body).then(rrShow)
+    function rrShow(p) {
+      if (!p) return
+      document.querySelectorAll("#rrSpeech button").forEach(b => b.classList.toggle("on", (b.dataset.v === "on") === !!p.speechOn))
+      $("rrSpeakOn").value = p.speakOn || "auto"
+      if (document.activeElement !== $("rrVol")) { $("rrVol").value = p.speechVol ?? 0.9; updateSliderFill($("rrVol")) }
+      $("rrVolTxt").textContent = Math.round(+$("rrVol").value * 100) + "%"
+    }
+    $("rrOpen").onclick = () => fetch("/open-routes", { method: "POST", body: "{}" }).then(r => r.json())
+      .then(r => { if (!r.ok) window.open("/routes/", "realroutes", "popup,width=1280,height=800") })
+    document.querySelectorAll("#rrSpeech button").forEach(b => b.onclick = () => rrSet({ speechOn: b.dataset.v === "on" }))
+    $("rrSpeakOn").onchange = () => rrSet({ speakOn: $("rrSpeakOn").value })
+    $("rrVol").addEventListener("input", () => { updateSliderFill($("rrVol")); $("rrVolTxt").textContent = Math.round(+$("rrVol").value * 100) + "%" })
+    $("rrVol").addEventListener("change", () => rrSet({ speechVol: +$("rrVol").value }))
+    const SPEAK_NAMES = { beamdeck: "this PC (BeamDeck)", aa: "the phone (Android Auto)", tablet: "the tablet / browser" }
+
     function busPoll() {
       busApi("state").then(st => {
+        rrShow(st.prefs)
+        if (st.speech) $("rrStatus").textContent = (st.prefs && !st.prefs.speechOn) ? "Speech is off."
+          : "Speaking on " + SPEAK_NAMES[st.speech.to] + "." + (st.speech.beamdeck ? "" : " (Speech on this PC needs Piper: run the installer again.)")
         const g = st.sign || {}, locked = g.locked
         $("busStatus").textContent = locked ? "A Real Routes shift is running on the tablet: it controls the signs."
           : (g.mode === "off" ? "Sign: Not in Service" : `Sign: ${g.routeID ? g.routeID + " " : ""}${g.direction}`)
@@ -1880,6 +1932,7 @@
         else if (m.type === "appsound") { appKey = m.key; renderApps() }
         else if (m.type === "pane") mapPane = m.where || ""
         else if (m.type === "gamecmd") gameCmd(m)
+        else if (m.type === "say") onSay(m)
         else if (m.type === "active") {
           windowActive = m.on; if (!m.on) { stopSending(); stopReceiving(); stopScreen(); micStop(); stopVoiceWs() }
           setStatus(m.on ? "Keep this window open: the sound plays from here." : "BeamDeck is open in another window: that one plays the car sound now.", !m.on)
@@ -1950,7 +2003,14 @@
       pcmIn.connect(hp); pcmIn.connect(analyser)
       const dry = ctx.createGain(), mpDest = ctx.createMediaStreamDestination()   // the music before the car effects,
       src.connect(dry); pcmIn.connect(dry); dry.connect(mpDest)                   // for other players (BeamMP)
-      nodes = { hp, body, lp, pan, gain, analyser, pcmIn, mpDest, bins: new Uint8Array(analyser.frequencyBinCount) }
+      // Real Routes speech: the same car-speaker colouring (muffled from outside, panned) but its own volume,
+      // separate from the music / Android Auto volume; the music dips while it talks
+      const sLp = ctx.createBiquadFilter(); sLp.type = "lowpass"; sLp.frequency.value = 20000; sLp.Q.value = 0.5
+      const sPan = ctx.createStereoPanner(), sCar = ctx.createGain(), sVol = ctx.createGain()
+      sLp.connect(sPan); sPan.connect(sCar); sCar.connect(sVol); sVol.connect(ctx.destination)
+      const duck = ctx.createGain()
+      gain.disconnect(); gain.connect(duck); duck.connect(ctx.destination)
+      nodes = { hp, body, lp, pan, gain, analyser, pcmIn, mpDest, sLp, sPan, sCar, sVol, duck, bins: new Uint8Array(analyser.frequencyBinCount) }
       // while paused (Chromium waits for a click) the shared music would be silence: start a fresh stream once it runs
       ctx.onstatechange = () => { if (ctx.state === "running" && mpSend && mpMe) startSending(mpMe) }
       applyAudio()
@@ -1982,6 +2042,44 @@
       nodes.hp.frequency.setTargetAtTime(lowcut, t, k)
       nodes.gain.gain.setTargetAtTime(g * vol, t, k)
       nodes.pan.pan.setTargetAtTime(p, t, k)
+      nodes.sLp.frequency.setTargetAtTime(Math.min(cutoff * 1.6, 20000), t, k)   // speech stays a bit clearer
+      nodes.sPan.pan.setTargetAtTime(p, t, k)
+      nodes.sCar.gain.setTargetAtTime(g, t, k)
+    }
+
+    // ---------------- Real Routes announcements and directions (Piper on this PC) ----------------
+    const sayQueue = []
+    let saying = false
+    function onSay(m) {
+      ensureAudio()
+      sayQueue.push(m)
+      if (!saying) sayNext()
+    }
+    async function sayNext() {
+      const m = sayQueue.shift()
+      if (!m) { saying = false; if (nodes) nodes.duck.gain.setTargetAtTime(1, ctx.currentTime, 0.25); return }
+      saying = true
+      try {
+        const buf = await ctx.decodeAudioData(await (await fetch(m.url)).arrayBuffer())
+        const t0 = ctx.currentTime + 0.05
+        nodes.sVol.gain.setValueAtTime(Math.max(0, Math.min(1.5, m.vol ?? 0.9)), t0)
+        nodes.duck.gain.setTargetAtTime(0.3, t0, 0.08)
+        let start = t0 + 0.15
+        if (m.ding) start = chime(t0) + 0.1           // a bus's two-tone ding before stops and routes
+        const src = ctx.createBufferSource(); src.buffer = buf; src.connect(nodes.sLp)
+        src.onended = () => setTimeout(sayNext, 250)
+        src.start(start)
+      } catch (e) { setTimeout(sayNext, 50) }
+    }
+    function chime(t) {
+      [[784, 0], [587, 0.32]].forEach(([f, d]) => {
+        const o = ctx.createOscillator(), g = ctx.createGain()
+        o.type = "sine"; o.frequency.value = f
+        g.gain.setValueAtTime(0, t + d); g.gain.linearRampToValueAtTime(0.35, t + d + 0.02)
+        g.gain.exponentialRampToValueAtTime(0.001, t + d + 0.6)
+        o.connect(g); g.connect(nodes.sLp); o.start(t + d); o.stop(t + d + 0.65)
+      })
+      return t + 0.75
     }
     $("vol").value = opts.vol; updateSliderFill($("vol"))
     $("vol").addEventListener("input", () => { opts.vol = +$("vol").value; saveOpts(); applyAudio(); updateSliderFill($("vol")) })
