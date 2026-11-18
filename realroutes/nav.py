@@ -5,6 +5,7 @@ The route comes from the game mod as points [[lat, lon], ...] and OSRM-style ste
 offset (metres along the route)}.
 """
 import math
+import time
 
 ICONS = {"left", "right", "slight_left", "slight_right", "sharp_left", "sharp_right", "uturn", "straight",
          "roundabout", "merge", "arrive", "depart"}
@@ -54,7 +55,23 @@ def cue(step):
         return "Make a U-turn" + onto
     if m in ("", "straight"):
         return "Continue" + onto
+    if m.startswith("slight"):
+        return f"Bear {side}{onto}"
+    if m.startswith("sharp"):
+        return f"Turn sharply {side}{onto}"
     return f"Turn {m}{onto}"
+
+
+def worth_saying(step):
+    """A real manoeuvre, not the road bending or changing its name (those aren't announced or shown)."""
+    t, m = step.get("type", ""), step.get("modifier", "") or ""
+    if t == "depart":
+        return False
+    if t in ("new name", "continue", "notification", "use lane"):
+        return m in ("left", "right", "sharp left", "sharp right", "uturn")
+    if t == "turn" and m in ("", "straight"):
+        return False
+    return True
 
 
 def spoken_distance(m):
@@ -76,6 +93,7 @@ class Nav:
         self.idx = 0                       # last matched segment, so a pose only searches nearby
         self.spoken = set()                # (step offset, "far" | "near") already said
         self.view = None
+        self._last_words, self._said_at = "", 0.0
 
     def set_route(self, route):
         if route.get("version") == self.version and self.xy:
@@ -119,44 +137,60 @@ class Nav:
         return along, off
 
     def update(self, lat, lon, speed, quiet_arrive=False):
-        """The car moved: returns the spoken prompts that are due now ([(text), ...]); self.view is the card."""
+        """The car moved: returns the spoken prompts that are due now; self.view is the card.
+
+        Calm on purpose: only real manoeuvres; at most one heads-up per turn, and only when the turn is far enough
+        from the previous one; turns close together are said as one sentence ("…, then …"); never the same words
+        twice in a row, and at least 8 s between prompts unless a turn is right there."""
         if not self.xy or lat is None or lon is None:
             self.view = None
             return []
         along, off = self._project(lat, lon)
         total = self.cum[-1]
-        ahead = [s for s in self.steps if s.get("type") != "depart" and s["offset"] > along + 3]
+        steps = [x for x in self.steps if worth_saying(x)]
+        ahead = [x for x in steps if x["offset"] > along + 3]
         if not ahead:
             self.view = None
             return []
         s = ahead[0]
         d = s["offset"] - along
-        nxt = ahead[1] if len(ahead) > 1 and ahead[1]["offset"] - s["offset"] < 150 else None
+        nxt = ahead[1] if len(ahead) > 1 and ahead[1]["offset"] - s["offset"] < 200 else None
         self.view = {"icon": icon(s), "cue": cue(s), "road": s.get("name") or "", "dist": round(d),
                      "distText": shown_distance(d), "exit": s.get("exit"),
                      "then": {"icon": icon(nxt), "cue": cue(nxt)} if nxt else None,
                      "left": round(max(0.0, total - along)), "off": round(off)}
-        # prompts: one well ahead (further at speed), one just before the turn
-        out = []
-        v = max(0.0, speed or 0.0)
-        near_d = min(150.0, max(45.0, v * 5))
-        far_d = min(1000.0, max(300.0, v * 25))
         key = s["offset"]
         arrive = s.get("type") == "arrive"
         if arrive and quiet_arrive:        # a bus shift says its own stops
-            return out
-        if d <= near_d and (key, "near") not in self.spoken:
+            return []
+        if (key, "near") in self.spoken:   # said as the "then" of the turn before, or already said
+            return []
+        v = max(0.0, speed or 0.0)
+        near_d = min(160.0, max(50.0, v * 5))
+        far_d = min(1000.0, max(350.0, v * 25))
+        prev = max([x["offset"] for x in steps if x["offset"] <= along + 3] or [0.0])
+        gap = s["offset"] - prev           # room before this turn since the last one
+        now = time.time()
+        out = []
+        lower = lambda c: c[0].lower() + c[1:]
+        mod = s.get("modifier") or ""
+        if d <= near_d:
             self.spoken |= {(key, "near"), (key, "far")}
-            words = "You have arrived" + (f". Your destination is on the {'left' if 'left' in (s.get('modifier') or '') else 'right'}"
-                                          if ("left" in (s.get("modifier") or "") or "right" in (s.get("modifier") or "")) else "") \
-                if arrive else cue(s)
-            if nxt and not arrive:
-                words += ", then " + cue(nxt)[0].lower() + cue(nxt)[1:]
+            if arrive:
+                words = "You have arrived" + (f". Your destination is on the {'left' if 'left' in mod else 'right'}"
+                                              if ("left" in mod or "right" in mod) else "")
+            else:
+                words = cue(s)
+                if nxt:                    # the next one comes straight after: say it now, not again later
+                    words += ", then " + lower(cue(nxt) if nxt.get("type") != "arrive" else "arrive")
+                    self.spoken |= {(nxt["offset"], "near"), (nxt["offset"], "far")}
             out.append(words + ".")
-        elif near_d + 80 < d <= far_d and (key, "far") not in self.spoken:
+        elif not arrive and d <= far_d and (key, "far") not in self.spoken and gap > far_d * 0.6 and d > near_d * 2.5 \
+                and now - self._said_at > 8:
             self.spoken.add((key, "far"))
-            c = cue(s)
-            words = ("Your destination is in " + spoken_distance(d)) if arrive else \
-                f"In {spoken_distance(d)}, {c[0].lower() + c[1:]}"
+            words = f"In {spoken_distance(d)}, {lower(cue(s))}"
             out.append(words + ".")
+        out = [w for w in out if w != self._last_words]
+        if out:
+            self._last_words, self._said_at = out[-1], now
         return out

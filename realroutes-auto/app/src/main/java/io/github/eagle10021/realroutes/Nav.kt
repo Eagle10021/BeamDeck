@@ -38,10 +38,19 @@ object Nav {
     /** The next turn ahead of `along` metres (the start of the route is skipped), and how far it is. */
     fun nextStep(route: Route, along: Double): Pair<RouteStep, Double>? {
         for (s in route.steps) {
-            if (s.offset.isNaN() || s.type == "depart") continue
+            if (s.offset.isNaN() || !worthShowing(s)) continue
             if (s.offset > along + 3) return s to (s.offset - along)
         }
         return null
+    }
+
+    /** A real manoeuvre, not the road bending or changing its name (the helper's nav.py uses the same rule). */
+    fun worthShowing(s: RouteStep): Boolean = when {
+        s.type == "depart" -> false
+        s.type in listOf("new name", "continue", "notification", "use lane") ->
+            s.modifier in listOf("left", "right", "sharp left", "sharp right", "uturn")
+        s.type == "turn" && s.modifier in listOf("", "straight") -> false
+        else -> true
     }
 
     /** OSRM maneuver -> Android Auto maneuver type and our arrow. */
@@ -93,6 +102,8 @@ object Nav {
                 "uturn" -> "Make a U-turn$onto"
                 "straight" -> "Continue$onto"
                 "" -> "Continue$onto"
+                "slight left", "slight right" -> "Bear ${if (m.contains("left")) "left" else "right"}$onto"
+                "sharp left", "sharp right" -> "Turn sharply ${if (m.contains("left")) "left" else "right"}$onto"
                 else -> "Turn $m$onto"
             }
         }.replaceFirstChar { it.uppercase() }
