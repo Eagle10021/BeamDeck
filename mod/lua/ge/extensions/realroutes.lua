@@ -490,25 +490,36 @@ local PREFER = {tractor = {"fifthwheel_v2", "fifthwheel", "gooseneck_hitch"}, dr
 local function rigSay(text)
   if rig then send({type = "freight", id = rig.id, event = "stage", text = text}) end
 end
+
+local BOX_SUFFIXES = {
+  "FA", "FB", "FC", "FD", "A", "B", "C", "D", "E", "F", "G", "H",
+  "RA", "RB", "RC", "RD", "RE", "RF",
+  "FAB", "FAT", "FBB", "FBT", "FCB", "FCT", "FDB", "FDT",
+  "AB", "AT", "BB", "BT", "CB", "CT", "DB", "DT", "EB", "ET", "FB", "FT", "GB", "GT", "HB", "HT",
+  "RAB", "RAT", "RBB", "RBT", "RCB", "RCT", "RDB", "RDT",
+  "trunk_A", "trunk_B", "trunk_C", "trunk_D", "trunk_E", "trunk_F", "trunk",
+  "seat_FL", "seat_FR", "seat_RA", "seat_RB", "seat_RC", "seat_RD", "seat_RE", "seat_RF", "seat_RG", "seat_RH", "seat_RL", "seat_RR", "seat_R"
+}
+
+local function clearCargoVars()
+  local vars = {}
+  for _, s in ipairs(BOX_SUFFIXES) do
+    vars["$box_" .. s .. "_weight"] = 0
+    vars["$box" .. s .. "_weight"] = 0
+    vars["$box_" .. s .. "_loadVolume"] = 0
+    vars["$box" .. s .. "_loadVolume"] = 0
+  end
+  vars["$loadVolume"] = 0
+  return vars
+end
+
 local function rigClearLoad()
   if rig and rig.loadSlot and rig.truckId then
-    local vd, tree = loadTree(rig.truckId)
-    local parts = vd and vd.config and vd.config.parts
-    if parts and parts[rig.loadSlot] and parts[rig.loadSlot] ~= "" then
-      parts[rig.loadSlot] = ""
-      if tree then
-        local function walk(n)
-          for _, c in pairs(n.children or {}) do
-            if c.id == rig.loadSlot then c.chosenPartName = ""; return end
-            walk(c)
-          end
-        end
-        walk(tree)
-      end
-      local flat = (core_vehicle_partmgmt and core_vehicle_partmgmt.partsTreeToPartsMap and core_vehicle_partmgmt.partsTreeToPartsMap(tree)) or parts
-      flat[rig.loadSlot] = ""
-      core_vehicle_partmgmt.setConfig({parts = flat, partsTree = tree and deepcopy(tree) or nil}, true, rig.truckId)
+    local vd = core_vehicle_manager.getVehicleData(rig.truckId)
+    if vd and vd.config then
+      vd.config.partsTree = nil
     end
+    core_vehicle_partmgmt.setConfig({parts = {[rig.loadSlot] = ""}, vars = clearCargoVars()}, true, rig.truckId)
     rig.loadSlot = nil
   end
 end
@@ -658,15 +669,41 @@ local function chooseLoad(vd, tree, patterns, wantKg, skip)
   return best
 end
 local function setLoadPart(vid, vd, tree, best)
-  best.node.chosenPartName = best.part
   local slot = best.node.id
   if rig and slot then rig.loadSlot = slot end
-  local parts = (core_vehicle_partmgmt and core_vehicle_partmgmt.partsTreeToPartsMap and core_vehicle_partmgmt.partsTreeToPartsMap(tree)) or {}
-  if slot then parts[slot] = best.part end
-  if vd and vd.config and vd.config.parts and slot then
-    vd.config.parts[slot] = best.part
+  best.node.chosenPartName = best.part
+
+  -- keep vd.config clean so serialize(config) is tiny and does NOT dump the huge partsTree
+  if vd and vd.config then
+    vd.config.partsTree = nil
   end
-  core_vehicle_partmgmt.setConfig({parts = parts, partsTree = deepcopy(tree)}, true, vid)
+
+  local cfg = {parts = {[slot] = best.part}}
+
+  -- compute variables for boxes or tanker loads so they have physical mass
+  local kind = rig and rig.loadKind or ""
+  local wantKg = rig and rig.wantKg or 8000
+  local vars = {}
+  if kind == "boxes" or best.part:lower():find("box", 1, true) then
+    local count = tonumber(best.part:lower():match("cargo_load_box_(%d+)xl") or best.part:lower():match("(%d+)xl")) or 10
+    if count < 1 then count = 10 end
+    local kgPerBox = math.min(800, math.max(50, math.floor(wantKg / count)))
+    for _, s in ipairs(BOX_SUFFIXES) do
+      vars["$box_" .. s .. "_weight"] = kgPerBox
+      vars["$box" .. s .. "_weight"] = kgPerBox
+      vars["$box_" .. s .. "_loadVolume"] = math.min(800, kgPerBox)
+      vars["$box" .. s .. "_loadVolume"] = math.min(800, kgPerBox)
+    end
+    if rig then
+      rig.loadKg = kgPerBox * count
+      rig.loadLabel = tostring(math.floor(rig.loadKg)) .. "kg Cargo Boxes"
+    end
+  elseif kind:sub(1, 7) == "tanker:" or best.part:lower():find("tanker", 1, true) then
+    vars["$loadVolume"] = math.min(16800, math.max(100, math.floor(wantKg)))
+  end
+  if next(vars) then cfg.vars = vars end
+
+  core_vehicle_partmgmt.setConfig(cfg, true, vid)
 end
 -- first step: the load part itself; a marble block comes with a rail mount, and the block follows once the mount is in
 local function applyLoadPart()
@@ -695,10 +732,10 @@ local function applySecondPart()
     block.node.chosenPartName = block.part
     local chain = chooseLoad(vd, tree, {"marble_block_chain"}, 0)         -- its chains, when the slot is there
     if chain then chain.node.chosenPartName = chain.part end
-    local parts = (core_vehicle_partmgmt and core_vehicle_partmgmt.partsTreeToPartsMap and core_vehicle_partmgmt.partsTreeToPartsMap(tree)) or {}
-    if block.node.id then parts[block.node.id] = block.part end
+    local parts = {[block.node.id] = block.part}
     if chain and chain.node.id then parts[chain.node.id] = chain.part end
-    core_vehicle_partmgmt.setConfig({parts = parts, partsTree = deepcopy(tree)}, true, rig.truckId)
+    if vd and vd.config then vd.config.partsTree = nil end
+    core_vehicle_partmgmt.setConfig({parts = parts}, true, rig.truckId)
     return true
   end
   return false
@@ -1399,7 +1436,7 @@ handlers.freightLoad = function(c)
   end
   if v then rig.truckId = v:getID() end
   rig.loadKind = type(c.kind) == "string" and c.kind or "none"
-  rig.wantKg = tonumber(c.weightKg) or 10000
+  rig.wantKg = tonumber(c.weightKg or c.weight) or 10000
   rig.trailers = c.trailers or rig.trailers or {}
   rig.prefer = PREFER[c.needs] or rig.prefer or {}
   rig.t0 = os.clockhp()

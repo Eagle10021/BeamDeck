@@ -90,6 +90,18 @@ function paintStaging() {
 }
 $("fStaging").onclick = async e => { const b = e.target.closest("button"); if (b) { await fpost({action: "staging", on: b.dataset.v === "1"}); paintStaging(); } };
 
+function paintTickets() {
+  const on = !fv || fv.tickets_on !== false;
+  document.querySelectorAll("#fTickets button").forEach(b => b.classList.toggle("on", (b.dataset.v === "1") === on));
+}
+if ($("fTickets")) $("fTickets").onclick = async e => { const b = e.target.closest("button"); if (b) { await fpost({action: "tickets", on: b.dataset.v === "1"}); paintTickets(); } };
+
+function paintPenalties() {
+  const on = !fv || fv.penalties_on !== false;
+  document.querySelectorAll("#fPenalties button").forEach(b => b.classList.toggle("on", (b.dataset.v === "1") === on));
+}
+if ($("fPenalties")) $("fPenalties").onclick = async e => { const b = e.target.closest("button"); if (b) { await fpost({action: "penalties", on: b.dataset.v === "1"}); paintPenalties(); } };
+
 function paintJobs() {
   if (!fb) { $("fJobsList").innerHTML = `<div class="empty">Loading the job board…</div>`; return; }
   // the market town
@@ -106,6 +118,8 @@ function paintJobs() {
              long: o => o.kind === "long", scenario: o => o.kind === "scenario" || o.kind === "custom"};
   document.querySelectorAll("#fFilters button").forEach(b => b.classList.toggle("on", b.dataset.f === fFilter));
   paintStaging();
+  paintTickets();
+  paintPenalties();
   const list = fb.offers.filter(F[fFilter] || F.all);
   $("fJobsCount").textContent = `${list.length} of ${fb.offers.length} jobs`;
   const oldMod = fv && fv.mod_old ? `<div class="fbanner" style="background:var(--bad-container);color:var(--on-bad-container)"><b>The game is running an older BeamDeck mod.</b> Press Ctrl+L in BeamNG (or restart it) so jobs can load.</div>` : "";

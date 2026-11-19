@@ -229,4 +229,30 @@ for _ in range(60):
     fr.update(pose(45.0, -75.0, speed=20.0, tr=0))
 ok(fr.job["lost_s"] > 3 and fr.job.get("_lost_said"), "an unhooked trailer is noticed")
 ok(fr.cancel()[0] and fr.state == "idle" and cmds("gpsClear"), "cancel clears the route")
+
+# --- options: tickets and penalties (ETS2/ATS style)
+ok(fr.view()["tickets_on"] and fr.view()["penalties_on"], "tickets and penalties are on by default")
+fr.act({"action": "tickets", "on": False})
+fr.act({"action": "penalties", "on": False})
+ok(not fr.tickets and not fr.penalties and not fr.view()["tickets_on"] and not fr.view()["penalties_on"],
+   "tickets and penalties can be toggled off like ETS2/ATS")
+fr.start(o2["id"])
+for c in cmds("places")[-(1 + len(o2["stops"])):]:
+    fr.on_places({"id": c["id"], "complete": True, "pending": False, "places": []})
+fr.on_game({"id": o2["id"], "event": "ready"})
+fr.on_game({"id": o2["id"], "event": "loaded", "coupled": True, "trailer": "box3a"})
+hold(45.0, -75.0, fr.job["load_s"] + 1)
+for _ in range(150):
+    clock[0] += 0.1
+    fr.update(pose(45.0, -75.0, speed=35.0, limit=10.0))
+ok(fr.job["tickets"] == 0, "with tickets off, speeding does not issue tickets or fines")
+fr.job["cond"] = 50.0
+fr.job["started"] = time.time() - (fr.job["mins"] + 30) * 60
+sc = fr._score(fr.job)
+ok(sc["fines"] == 0 and sc["cond_f"] == 1.0 and sc["time_f"] == 1.0 and sc["stars"] == 5.0 and sc["pay"] == o2["pay"],
+   "with penalties off, damaged cargo and late delivery still receive full pay and 5 stars")
+fr.cancel()
+fr.act({"action": "tickets", "on": True})
+fr.act({"action": "penalties", "on": True})
+
 print("\nall freight tests passed")
