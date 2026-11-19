@@ -83,6 +83,8 @@ object Speaker {
             focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(attrs).build()
             focus?.let { am?.requestAudioFocus(it) }
         }
+        val rate = a.optDouble("rate", 0.85).coerceIn(0.5, 1.5)             // the speaking speed set on the tablet
+        t.setSpeechRate(rate.toFloat())
         val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, vol.coerceIn(0.0, 1.0).toFloat()) }
         t.speak(a.optString("say", a.optString("text")), TextToSpeech.QUEUE_ADD, params, "rr" + a.optLong("id"))
     }

@@ -57,9 +57,22 @@ ok(fr2.caps_of("percheron", "bof road") == {"tractor"}, "the player can set what
 fr2.select_truck("percheron", "ruck")
 ok(D.can_carry(fr2.truck_caps(), D.CARGO_BY_ID["drawbar_flat"]) and not D.can_carry(fr2.truck_caps(), D.CARGO_BY_ID["dryvan"]), "the custom flatbed takes drawbar jobs, not semi jobs")
 
+# --- an older mod in the game is spotted instead of leaving a job stuck
+fr3 = F.Freight(lambda c: None, tempfile.mkdtemp()); fr3.pose = {"lat": 45.4, "lon": -75.7, "_at": clock[0]}
+fr3.models = fr.models
+fr3.select_truck("percheron", "xl500_6x4_fifthwheel_m"); fr3.set_market("Ottawa", refresh=True)
+ok(not fr3.mod_old(), "right after the helper starts the mod's version is simply not known yet")
+fr3.on_hello({"type": "hello"})                                          # an old mod sends no version
+ok(fr3.mod_old() and fr3.view()["mod_old"], "a game whose mod sends no version is reported as running an older mod")
+okk, why = fr3.start(fr3.market["offers"][0]["id"])
+ok(not okk and "Ctrl+L" in why, "a job is not started against an older mod, and the reason says what to do")
+fr3.on_hello({"type": "hello", "rr": F.MOD_REQUIRED})
+ok(not fr3.mod_old(), "the current mod is accepted")
+
 # --- the board: Ottawa market, the corridor towns, scenarios
 pose = lambda lat, lon, **k: {"type": "pose", "lat": lat, "lon": lon, "speed": 0, "gx": 0, "gy": 0, "heading": 90, **k}
 fr.update(pose(45.4215, -75.6972))
+fr.on_hello({"type": "hello", "rr": F.MOD_REQUIRED})                     # the game's mod is current
 ok(fr.select_truck("percheron", "xl500_6x4_fifthwheel_m")[0], "select the Percheron tractor")
 ok(fr.set_market("Ottawa", refresh=True)[0], "market for Ottawa")
 b = fr.board()

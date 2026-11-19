@@ -26,7 +26,7 @@ JOLT, THROW = 3.0, 5.5  # m/s² horizontal: uncomfortable / standing passengers 
 
 
 # shared console settings (see Helper.set_prefs)
-PREF_DEFAULTS = {"v": 0, "mode": "bus", "speechOn": True, "speechVol": 0.9, "speakOn": "auto", "sayStops": True,
+PREF_DEFAULTS = {"v": 0, "mode": "bus", "speechOn": True, "speechVol": 0.9, "speechRate": 0.85, "speakOn": "auto", "sayStops": True,
                  "sayRiders": True, "sayNav": True, "voice": 0, "mapView": "chase", "mapStyle": "dark"}
 # Piper's en_US-libritts_r-medium has 904 speakers; these are the announcer voices offered in the settings
 N_SPEAKERS = 904
@@ -567,7 +567,8 @@ class Helper:
             if voice == VOICES[p["voice"] % len(VOICES)]:
                 voice = (voice + 1) % N_SPEAKERS
         item = {"id": self._pa_id, "t": round(time.time(), 1), "text": text, "say": spoken(text), "kind": kind,
-                "who": who, "voice": voice, "ding": kind in ("stop", "route"), "quiet": not on, "to": self.speech_to()}
+                "who": who, "voice": voice, "ding": kind in ("stop", "route"), "quiet": not on, "to": self.speech_to(),
+                "rate": p["speechRate"]}
         self.pa = (self.pa + [item])[-8:]
         if on and item["to"] == "beamdeck" and self.on_say:
             try:
@@ -586,6 +587,8 @@ class Helper:
     def set_prefs(self, body):
         changed = False
         for k, v in (body or {}).items():
+            if k == "speechRate" and isinstance(v, (int, float)) and not isinstance(v, bool):
+                v = round(min(1.3, max(0.6, float(v))), 2)
             if k == "speechVol" and isinstance(v, (int, float)) and not isinstance(v, bool):
                 v = round(min(1.5, max(0.0, float(v))), 2)
             if k in PREF_DEFAULTS and k != "v" and type(v) is type(PREF_DEFAULTS[k]) and v != self.prefs.get(k):
@@ -718,7 +721,7 @@ class Helper:
                     self.nav.set_route(self.route)
                 elif m.get("type") == "hello":
                     self.game["seen"] = time.time()
-                    self.freight.on_hello()
+                    self.freight.on_hello(m)
                     self.game["earth"] = m.get("earth")
                     if m.get("mapPort"):
                         self.map_port = int(m["mapPort"])

@@ -5,6 +5,8 @@
 -- Needs BeamNG.Earth (its modding API gives real coordinates). The bus displays work on the stock city bus.
 local M = {}
 
+local MOD_VERSION = 6              -- the helper (freight.py MOD_REQUIRED) warns when the game runs an older copy of this file
+
 local socket = require("socket")
 local udp
 local GAME_PORT, HELPER_PORT = 47150, 47151
@@ -344,6 +346,34 @@ local function mode(n)
     if ok then return r end
   end
 end
+-- The retarder and engine brake name their readings and levels in the truck's own jbeam (a Percheron's retarder has an
+-- Auto mode and a custom reading name), so what is shown comes from that configuration, not from assumed names.
+local function jd(name)
+  local d = v and v.data and v.data[name]
+  return type(d) == "table" and d or nil
+end
+local rc = jd("retarderControl")
+local rname = rc and rc.controlledRetarder or "retarder"
+local retIdx = ev[(rc and rc.electricsNameLevelIndex) or (rname .. "_levelIndex")]
+local retA = ev[(rc and rc.electricsNameActual) or (rname .. "_actual")]
+local retAuto = rc and rc.hasAutoMode or false
+local retL
+if retIdx then
+  local levels = rc and rc.retarderManualLevels or {0.2, 0.4, 0.6, 0.8, 1.0}
+  local offIdx = retAuto and 2 or 1                       -- the list is: [auto,] off, then the manual levels
+  if retAuto and retIdx == 1 then retL = "Auto"
+  elseif retIdx == offIdx then retL = "Off"
+  else
+    local lv = levels[retIdx - offIdx]
+    retL = lv and (math.floor(lv * 100 + 0.5) .. "%") or ("L" .. retIdx)
+  end
+end
+local cb = jd("compressionBrake")
+local ename = cb and cb.controlledEngine or "mainEngine"
+local cbIdx = ev[(cb and cb.electricsNameLevelIndex) or (ename .. "_compressionBrake_levelIndex")]
+local cbOn = ev[(cb and cb.electricsNameIsEnabled) or (ename .. "_compressionBrake_isEnabled")]
+local cbLevels = cb and cb.compressionBrakeLevels or {0.33, 0.66, 1.0}
+local cbL = cbIdx and cbLevels[cbIdx] and (math.floor(cbLevels[cbIdx] * 100 + 0.5) .. "%") or nil
 if rrTick % 20 == 1 then   -- the weight of the whole vehicle: every two seconds is plenty
   local ok, st = pcall(function() return obj:calcBeamStats() end)
   if ok and st then rrMass = st.total_weight end
@@ -356,8 +386,7 @@ obj:queueGameEngineLua("if realroutes then realroutes.onVeh(" .. serialize({
   wT = ev.watertemp, oT = ev.oiltemp, odo = ev.odometer, trip = ev.trip, pb = ev.parkingbrake,
   load = ev.engineLoad, eng = ev.engineRunning, boost = ev.turboBoost, chk = ev.checkengine, lowf = ev.lowfuel,
   dmg = beamstate.damage, mass = rrMass,
-  ret = ev.retarder_levelIndex, retS = ev.retarder_setting, retOn = ev.retarder_isEnabled,
-  cb = ev.mainEngine_compressionBrake_levelIndex, cbOn = ev.mainEngine_compressionBrake_isEnabled,
+  ret = retIdx, retL = retL, retA = retA, retAuto = retAuto, cb = cbIdx, cbL = cbL, cbOn = cbOn,
   cc = ev.cruiseControlActive, ccT = ev.cruiseControlTarget, mix = ev.mixer_on,
   ptoRpm = rrTruck and rrTruck.getRPM() or nil, raised = ev.raisedIdle,
   has = {ret = has("retarderControl"), cb = has("compressionBrake"), la = has("liftAxleControl"),
@@ -461,7 +490,30 @@ local PREFER = {tractor = {"fifthwheel_v2", "fifthwheel", "gooseneck_hitch"}, dr
 local function rigSay(text)
   if rig then send({type = "freight", id = rig.id, event = "stage", text = text}) end
 end
+local function rigClearLoad()
+  if rig and rig.loadSlot and rig.truckId then
+    local vd, tree = loadTree(rig.truckId)
+    local parts = vd and vd.config and vd.config.parts
+    if parts and parts[rig.loadSlot] and parts[rig.loadSlot] ~= "" then
+      parts[rig.loadSlot] = ""
+      if tree then
+        local function walk(n)
+          for _, c in pairs(n.children or {}) do
+            if c.id == rig.loadSlot then c.chosenPartName = ""; return end
+            walk(c)
+          end
+        end
+        walk(tree)
+      end
+      local flat = (core_vehicle_partmgmt and core_vehicle_partmgmt.partsTreeToPartsMap and core_vehicle_partmgmt.partsTreeToPartsMap(tree)) or parts
+      flat[rig.loadSlot] = ""
+      core_vehicle_partmgmt.setConfig({parts = flat, partsTree = tree and deepcopy(tree) or nil}, true, rig.truckId)
+    end
+    rig.loadSlot = nil
+  end
+end
 local function rigClearTrailers()
+  rigClearLoad()
   for id in pairs(rigTrailers) do
     local o = getObjectByID(id)
     if o then pcall(function() o:delete() end) end
@@ -607,7 +659,14 @@ local function chooseLoad(vd, tree, patterns, wantKg, skip)
 end
 local function setLoadPart(vid, vd, tree, best)
   best.node.chosenPartName = best.part
-  core_vehicle_partmgmt.setConfig({partsTree = deepcopy(tree)}, true, vid)
+  local slot = best.node.id
+  if rig and slot then rig.loadSlot = slot end
+  local parts = (core_vehicle_partmgmt and core_vehicle_partmgmt.partsTreeToPartsMap and core_vehicle_partmgmt.partsTreeToPartsMap(tree)) or {}
+  if slot then parts[slot] = best.part end
+  if vd and vd.config and vd.config.parts and slot then
+    vd.config.parts[slot] = best.part
+  end
+  core_vehicle_partmgmt.setConfig({parts = parts, partsTree = deepcopy(tree)}, true, vid)
 end
 -- first step: the load part itself; a marble block comes with a rail mount, and the block follows once the mount is in
 local function applyLoadPart()
@@ -636,7 +695,10 @@ local function applySecondPart()
     block.node.chosenPartName = block.part
     local chain = chooseLoad(vd, tree, {"marble_block_chain"}, 0)         -- its chains, when the slot is there
     if chain then chain.node.chosenPartName = chain.part end
-    core_vehicle_partmgmt.setConfig({partsTree = deepcopy(tree)}, true, rig.truckId)
+    local parts = (core_vehicle_partmgmt and core_vehicle_partmgmt.partsTreeToPartsMap and core_vehicle_partmgmt.partsTreeToPartsMap(tree)) or {}
+    if block.node.id then parts[block.node.id] = block.part end
+    if chain and chain.node.id then parts[chain.node.id] = chain.part end
+    core_vehicle_partmgmt.setConfig({parts = parts, partsTree = deepcopy(tree)}, true, rig.truckId)
     return true
   end
   return false
@@ -1322,11 +1384,24 @@ handlers.freightGoto = function(c)
 end
 -- at the pickup: hook the trailer on and / or put the load on the deck
 handlers.freightLoad = function(c)
-  if not (rig and rig.stage == "waiting" and rig.id == c.id) then return end
+  local v = player()
+  if not rig or rig.id ~= c.id then
+    if not v then
+      log("W", "realroutes", "freightLoad: no vehicle and no active rig for job " .. tostring(c.id))
+      return
+    end
+    log("I", "realroutes", "freightLoad: adopting current player truck for job " .. tostring(c.id))
+    rig = {id = c.id, truckId = v:getID(), trailers = c.trailers or {}, prefer = PREFER[c.needs] or {}, defer = true, stage = "waiting"}
+  end
+  if rig.stage ~= "waiting" and rig.stage ~= "settle" and rig.stage ~= "loadpart" and rig.stage ~= "trailer" then
+    log("W", "realroutes", "freightLoad: stage was " .. tostring(rig.stage) .. ", proceeding with load")
+    rig.stage = "waiting"
+  end
+  if v then rig.truckId = v:getID() end
   rig.loadKind = type(c.kind) == "string" and c.kind or "none"
   rig.wantKg = tonumber(c.weightKg) or 10000
-  rig.trailers = c.trailers or rig.trailers
-  rig.prefer = PREFER[c.needs] or rig.prefer
+  rig.trailers = c.trailers or rig.trailers or {}
+  rig.prefer = PREFER[c.needs] or rig.prefer or {}
   rig.t0 = os.clockhp()
   rigSay("Loading…")
   if #rig.trailers > 0 then rig.stage, rig.tIdx = "trailer", 1
@@ -1421,7 +1496,11 @@ end
 -- ---- every frame ----
 local function onUpdate(dtReal)
   receive()
-  rigUpdate()
+  local ok, err = pcall(rigUpdate)                     -- a mistake in the rig must not leave a job waiting for ever
+  if not ok then
+    log("E", "realroutes", "rig: " .. tostring(err))
+    if rig then rigFail("The game could not finish setting up the load (" .. tostring(err):sub(1, 120) .. "). See beamng.log.") end
+  end
   pumpVehicles()
   local a = api()
   if pendingGoto and os.clockhp() >= pendingGoto.at then
@@ -1459,7 +1538,7 @@ local function onUpdate(dtReal)
   if helloTimer <= 0 then
     helloTimer = 5
     local isFlat = a == flat
-    send({type = "hello", earth = a and a.earthVersion and a.earthVersion() or nil, mapPort = mapPort(),
+    send({type = "hello", rr = MOD_VERSION, earth = a and a.earthVersion and a.earthVersion() or nil, mapPort = mapPort(),
           flat = isFlat or nil, level = isFlat and getCurrentLevelIdentifier() or nil,
           roads = isFlat and exportRoads() or nil, buslines = isFlat and exportBuslines() or nil})
   end
@@ -1480,7 +1559,8 @@ local function onUpdate(dtReal)
         rpm = veh.rpm, gear = veh.gear, fuel = veh.fuel, fuelL = veh.fuelL, fuelCap = veh.fuelCap, wT = veh.wT, oT = veh.oT,
         odo = veh.odo, trip = veh.trip, pb = veh.pb, load = veh.load, eng = veh.eng, boost = veh.boost, chk = veh.chk,
         lowf = veh.lowf, dmg = veh.dmg, mass = veh.mass, tr = trailerCount(),
-        ret = veh.ret, retS = veh.retS, retOn = veh.retOn, cb = veh.cb, cbOn = veh.cbOn, cc = veh.cc, ccT = veh.ccT,
+        ret = veh.ret, retL = veh.retL, retA = veh.retA, retAuto = veh.retAuto, cb = veh.cb, cbL = veh.cbL, cbOn = veh.cbOn,
+        cc = veh.cc, ccT = veh.ccT,
         mix = veh.mix, has = veh.has, dm = veh.dm, ptoRpm = veh.ptoRpm, raised = veh.raised})
 end
 

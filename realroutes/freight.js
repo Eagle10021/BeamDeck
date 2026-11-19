@@ -108,7 +108,8 @@ function paintJobs() {
   paintStaging();
   const list = fb.offers.filter(F[fFilter] || F.all);
   $("fJobsCount").textContent = `${list.length} of ${fb.offers.length} jobs`;
-  const banner = !fb.truck ? `<div class="fbanner"><b>No truck picked yet.</b> Every job needs one: choose it in the Garage (your own saved configs are listed first, marked Custom).<button class="go" id="fToGarage" style="padding:10px 22px;font-size:16px">Open the Garage</button></div>` : "";
+  const oldMod = fv && fv.mod_old ? `<div class="fbanner" style="background:var(--bad-container);color:var(--on-bad-container)"><b>The game is running an older BeamDeck mod.</b> Press Ctrl+L in BeamNG (or restart it) so jobs can load.</div>` : "";
+  const banner = oldMod + (!fb.truck ? `<div class="fbanner"><b>No truck picked yet.</b> Every job needs one: choose it in the Garage (your own saved configs are listed first, marked Custom).<button class="go" id="fToGarage" style="padding:10px 22px;font-size:16px">Open the Garage</button></div>` : "");
   $("fJobsList").innerHTML = banner + (list.length ? list.map(offerHTML).join("") :
     `<div class="empty">${fFilter === "fits" ? "Nothing here fits your truck. Try All, another town, or another truck." : "No jobs of this kind here. Try another town."}</div>`);
   const g2 = $("fToGarage"); if (g2) g2.onclick = () => setFTab("garage");
@@ -282,7 +283,7 @@ function paintGauges(t, job) {
   gset("trip", n(t.trip) ? "–" : `${(t.trip / 1000).toFixed(1)}<small>km</small>`);
   gset("odo", n(t.odo) ? "–" : `${Math.round(t.odo / 1000).toLocaleString()}<small>km</small>`);
   gset("cruise", t.cc ? `${t.ccT ?? ""}<small>km/h</small>` : "Off");
-  gset("ret", t.retS > 0 ? `${Math.round(t.retS * 100)}<small>%</small>` : "Off");
+  gset("ret", t.retL ? (t.retL === "Off" || t.retL === "Auto" ? t.retL : t.retL.replace("%", "<small>%</small>")) : "–", {level: t.retA > 0.01 ? "warn" : null});
   gset("park", (t.pb || 0) > 0.5 ? "ON" : "Off", {level: (t.pb || 0) > 0.5 && (t.speed || 0) > 5 ? "hot" : null});
   gset("eng", t.check ? "Check" : t.eng ? "Running" : "Off", {level: t.check ? "warn" : null});
 }
@@ -291,8 +292,12 @@ function paintGauges(t, job) {
 // type: tog (toggle), step (- value +), seg (choices), act (a press), hold (while pressed)
 const CTRL = [
   {g: "Braking", items: [
-    {t: "step", id: "ret", label: "Retarder", has: "ret", dn: "retarder_down", up: "retarder_up", val: t => t.retS > 0 ? Math.round(t.retS * 100) + "%" : "Off", on: t => t.retS > 0},
-    {t: "step", id: "cb", label: "Engine brake", has: "cb", dn: "jake_down", up: "jake_up", val: t => t.cbOn ? "Level " + (t.cb ?? "") : "Off", on: t => !!t.cbOn},
+    {t: "step", id: "ret", label: "Retarder", has: "ret", dn: "retarder_down", up: "retarder_up", val: t => t.retL || "–",
+      sub: t => t.retA > 0.01 ? `Retarder · braking ${Math.round(t.retA * 100)}%` : "Retarder", on: t => !!t.retL && t.retL !== "Off"},
+    {t: "act", id: "rea", label: "Auto", sub: "follows the brake", has: "ret", name: "retarder_auto", show: t => !!t.retAuto},
+    {t: "act", id: "reo", label: "Off", has: "ret", name: "retarder_off"},
+    {t: "step", id: "cb", label: "Engine brake", has: "cb", dn: "jake_down", up: "jake_up", val: t => t.cbOn ? (t.cbL || "On") : "Off",
+      sub: t => t.cbOn ? `Engine brake · level ${t.cb ?? ""}` : "Engine brake", on: t => !!t.cbOn},
     {t: "tog", id: "park", label: "Parking brake", on: t => (t.pb || 0) > 0.5, send: t => (t.pb || 0) > 0.5 ? "park_off" : "park_on"},
   ]},
   {g: "Cruise control", items: [
@@ -376,7 +381,10 @@ function paintControls(t, job) {
       if (it.has && !Object.keys(has).length) vis = false;                    // nothing known yet: don't guess
       el.classList.toggle("ctrlhide", !vis); el.style.display = vis ? "contents" : "none";
       if (vis) any = true; else return;
-      if (it.t === "step") { el.querySelector(".cv b").textContent = it.val(t); el.querySelector(".cstep").classList.toggle("on", it.on(t)); }
+      if (it.t === "step") {
+        el.querySelector(".cv b").textContent = it.val(t); el.querySelector(".cstep").classList.toggle("on", it.on(t));
+        if (it.sub) el.querySelector(".cv small").textContent = it.sub(t);
+      }
       else if (it.t === "seg") { const c = it.cur(t); el.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.k === c)); }
       else if (it.t === "tog") { const b = el.querySelector("button"); b.classList.toggle("on", !!it.on(t)); if (it.sub) b.querySelector("small").textContent = it.sub(t); }
     });
@@ -462,8 +470,49 @@ function paintPto(t) {
 }
 
 // ---------------------------------------------------------------- the cockpit: the job strip
+let fStripCollapsed = false, lastStrip = null;
+try { fStripCollapsed = localStorage.getItem("rrFStrip") === "1"; } catch {}
+function toggleStrip() {
+  fStripCollapsed = !fStripCollapsed;
+  try { localStorage.setItem("rrFStrip", fStripCollapsed ? "1" : "0"); } catch {}
+  if (lastStrip) paintStrip(...lastStrip);
+}
+// the whole job card as one line: what matters while driving, with the progress bars kept
+function compactStrip(job, st) {
+  const phase = st.state, left = job.left, late = left < 0;
+  let mini = "", bar = 0;
+  if (phase === "resolving" || phase === "spawning") mini = esc(job.stage);
+  else if (phase === "to_pickup") mini = `📍 Pickup ${fkm((job.pickup || {}).dist_km)}`;
+  else if (phase === "loading") { mini = `📦 Loading · stay stopped · ${job.load_s ?? 0} s`; bar = job.load_pct || 0; }
+  else {
+    mini = `<span class="${late || left < 600 ? "late" : ""}">${late ? "+" : ""}${fclock(Math.abs(left))}${late ? " late" : " left"}</span> · ${fkm(job.dist_left_km)} · <span class="${job.cond < 60 ? "bad" : job.cond < 85 ? "late" : ""}">cargo ${job.cond}%</span>${job.tickets ? ` · <span class="bad">${job.tickets} ticket${job.tickets > 1 ? "s" : ""}</span>` : ""}`;
+    if (job.unload_pct > 0) { mini = `📤 Unloading · keep still`; bar = job.unload_pct; }
+  }
+  const next = phase === "driving" ? (job.stops.find(p => p.now) || {}).name : phase === "to_pickup" ? (job.pickup || {}).name : "";
+  return `<div class="jt compact"><div class="ji">${job.icon}</div><div class="jmini"><b>${esc(job.title)}</b>${next ? ` <span class="muted">→ ${esc(next)}</span>` : ""} <span class="muted">·</span> ${mini}</div>
+    <button class="jtoggle" id="fStripToggle" title="Show the job details">▾</button></div>${bar ? `<div class="jbar"><i style="width:${bar}%"></i></div>` : ""}`;
+}
+
+// The card is redrawn from fresh data twice a second; a redraw between a finger touching a button and lifting off would
+// swallow the tap, so it holds still while the card is being pressed and catches up right after.
+let stripPressed = false;
+$("fStrip").addEventListener("pointerdown", () => { stripPressed = true; });
+["pointerup", "pointercancel"].forEach(ev => document.addEventListener(ev, () => {
+  if (!stripPressed) return;
+  stripPressed = false;
+  setTimeout(() => { if (lastStrip && !stripPressed) paintStrip(...lastStrip); }, 80);
+}));
+
 function paintStrip(job, t, st) {
+  lastStrip = [job, t, st];
+  if (stripPressed) return;
   const s = $("fStrip"), phase = st.state;
+  s.classList.toggle("collapsed", fStripCollapsed);
+  if (fStripCollapsed) {
+    s.innerHTML = compactStrip(job, st);
+    $("fStripToggle").onclick = toggleStrip;
+    return;
+  }
   const drops = job.stops.map(p => `<span class="${p.done ? "done" : p.now ? "now" : ""}">${p.done ? "✓ " : ""}${esc(p.name)}</span>`).join("");
   let body = "";
   if (phase === "resolving" || phase === "spawning") {
@@ -476,7 +525,9 @@ function paintStrip(job, t, st) {
       <div class="jstage" style="padding:2px 0">The clock starts once the load is on. Stop in the pickup area to load.
         <button class="cap" id="fSkip" style="cursor:pointer;margin-left:10px">Skip the drive</button></div>`;
   } else if (phase === "loading") {
-    body = `<div class="jstage">📦 Loading ${esc(job.load)} · stay stopped · <b>${job.load_s ?? 0} s</b></div>
+    const waiting = (job.load_pct || 0) >= 100;
+    body = `<div class="jstage">📦 Loading ${esc(job.load)} · stay stopped · <b>${job.load_s ?? 0} s</b>${fv && fv.mod_old ? ` <span class="bad">· the game runs an older BeamDeck mod: press Ctrl+L in BeamNG</span>` : waiting ? ` <span class="muted">· waiting for the game…</span>` : ""}
+      ${waiting ? `<button class="cap" id="fSkipLoad" style="cursor:pointer;margin-left:10px">Continue anyway</button>` : ""}</div>
       <div class="jbar"><i style="width:${job.load_pct || 0}%"></i></div>`;
   } else if (phase === "driving") {
     const left = job.left, late = left < 0;
@@ -488,9 +539,11 @@ function paintStrip(job, t, st) {
       <div><b class="${job.tickets ? "bad" : ""}">${fm(job.pay)}</b><span>${job.tickets ? job.tickets + " ticket" + (job.tickets > 1 ? "s" : "") : "Pay"}</span></div></div>${unl}`;
   }
   s.innerHTML = `<div class="jt"><div class="ji">${job.icon}</div><div><b>${esc(job.title)}</b><small>${esc(job.load)} · ${job.weight} t · from ${esc(job.from)}${job.rig && job.rig.trailer_name ? " · " + esc(job.rig.trailer_name) : ""}${job.rig && job.rig.load_name ? " · " + esc(job.rig.load_name) : ""}</small></div>
-    <button class="jcancel" id="fCancel">Cancel job</button></div><div class="jdrops">${drops}</div>${body}`;
+    <button class="jcancel" id="fCancel">Cancel job</button><button class="jtoggle" id="fStripToggle" title="Collapse the job details">▴</button></div><div class="jdrops">${drops}</div>${body}`;
+  $("fStripToggle").onclick = toggleStrip;
   $("fCancel").onclick = () => { if (confirm("Cancel this job? The pay is lost.")) fpost({action: "cancel"}); };
   const sk = $("fSkip"); if (sk) sk.onclick = () => fpost({action: "skip_to_pickup"});
+  const sl = $("fSkipLoad"); if (sl) sl.onclick = () => fpost({action: "skip_loading"});
 }
 
 // ---------------------------------------------------------------- summary

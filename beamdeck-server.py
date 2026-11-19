@@ -2173,7 +2173,7 @@ def routes_say(item):
             pass
     try:
         p.stdin.write(json.dumps({"id": item["id"], "text": item.get("say") or item["text"], "voice": item.get("voice", 0),
-                                  "rate": 1.05 if item["kind"] == "rider" else 1.0,
+                                  "rate": (1.03 if item["kind"] == "rider" else 1.0) * float(item.get("rate", 1.0)),
                                   "out": os.path.join(SAY_DIR, f"{item['id']}.wav")}) + "\n")
         p.stdin.flush()
     except OSError as e:

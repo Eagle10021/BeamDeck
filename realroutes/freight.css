@@ -138,3 +138,10 @@ body.fdriving .modes { display: none; }
 .cap.swap:active { scale: .95; }
 .jbar { height: 8px; border-radius: 999px; background: var(--panel2); overflow: hidden; } .jbar i { display: block; height: 100%; width: 0; background: var(--md-primary); transition: width .5s; }
 .jstage b { color: var(--text); }
+.jtoggle { flex: none; background: var(--panel2); color: var(--muted); width: 44px; height: 44px; border-radius: 14px; font-size: 20px; line-height: 1; }
+.jtoggle:active { scale: .92; }
+.jobstrip .jt .jcancel { margin-left: auto; }
+.jobstrip.collapsed { padding: 6px 10px; gap: 4px; }
+.jt.compact { gap: 10px; } .jt.compact .ji { font-size: 22px; } .jt.compact .jtoggle { width: 40px; height: 40px; }
+.jmini { flex: 1; min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .jmini b { font-size: 16px; }
+.jmini .late { color: var(--late); } .jmini .bad { color: var(--bad); }

@@ -62,6 +62,7 @@ class FakeGame:
         self.has = {}
         self.dm = {"r": "unlocked", "f": "unlocked", "i": "unlocked", "t": "2hi"}
         self.ret, self.cbOn, self.cc, self.ccT, self.pb, self.pto = 0, False, False, None, 0, None
+        self.ret_auto = False
         self.ptoRpm = None
         self.spawn_at = None
         self.pending = None
@@ -114,8 +115,10 @@ class FakeGame:
             self.target = None
         elif k == "truck":
             n = c["name"]
-            if n == "retarder_up": self.ret = min(5, self.ret + 1)
-            elif n == "retarder_down": self.ret = max(0, self.ret - 1)
+            if n == "retarder_up": self.ret = min(5, self.ret + 1); self.ret_auto = False
+            elif n == "retarder_down": self.ret = max(0, self.ret - 1); self.ret_auto = False
+            elif n == "retarder_auto": self.ret_auto = True
+            elif n == "retarder_off": self.ret, self.ret_auto = 0, False
             elif n == "jake_toggle": self.cbOn = not self.cbOn
             elif n == "park_on": self.pb = 1
             elif n == "park_off": self.pb = 0
@@ -151,7 +154,7 @@ class FakeGame:
             now = time.time()
             if now - t_hello > 4:
                 t_hello = now
-                self.send({"type": "hello", "earth": "1.8.2", "mapPort": None})
+                self.send({"type": "hello", "rr": 6, "earth": "1.8.2", "mapPort": None})
             if self.pending and now >= self.spawn_at:
                 c, self.pending = self.pending, None
                 at = c["at"]
@@ -196,8 +199,8 @@ class FakeGame:
                        "gx": 0.3, "gy": 0.2, "rpm": rpm + random.uniform(-15, 15), "gear": 9 if sp > 12 else 3 if sp > 1 else "N", "fuel": self.fuel,
                        "fuelL": self.fuel * 450, "fuelCap": 450, "wT": 86 + min(14, sp * 0.1), "oT": 97 + min(20, sp * 0.3), "odo": 482310000 + self.lat * 0,
                        "trip": 183400, "pb": self.pb, "load": 0.2 + min(0.6, sp * .02), "eng": 1, "mass": 31800 if self.tr else 9400, "tr": self.tr,
-                       "has": self.has, "dm": self.dm, "ret": 1 + self.ret, "retS": self.ret * 0.2, "retOn": self.ret > 0, "cb": 2 if self.cbOn else 1,
-                       "cbOn": self.cbOn, "cc": self.cc, "ccT": self.ccT, "ptoRpm": self.ptoRpm})
+                       "has": self.has, "dm": self.dm, "ret": 2 + self.ret, "retL": "Auto" if self.ret_auto else "Off" if self.ret == 0 else f"{self.ret * 20}%",
+                       "retA": 0.0 if self.ret_auto else self.ret * 0.2, "retAuto": True, "cb": 3, "cbL": "100%", "cbOn": self.cbOn, "cc": self.cc, "ccT": self.ccT, "ptoRpm": self.ptoRpm})
 
     def stop(self):
         self.alive = False

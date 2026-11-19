@@ -33,6 +33,8 @@ CONTRACTS = {"rush": {"title": "Express", "mins": 0.72, "pay": 1.35, "label": "E
              "valuable": {"title": "High-value", "frag": 0.35, "pay": 1.45, "label": "High-value cargo +45%"}}
 TAILORED = 0.45                    # share of generated jobs made for the selected truck (the rest are general)
 TAILORED_MIN = 6                   # a fresh board always has at least this many
+MOD_REQUIRED = 6                   # the oldest BeamDeck mod (realroutes.lua MOD_VERSION) this helper works with
+LOAD_WAIT_S = 12                   # after the loading time, how long to wait for the game's answer before going on
 MODELS_V = 2                       # version of the truck list the mod sends (2: key parts and the config's source)
 ROAD = ((40, 1.35), (200, 1.28), (1e9, 1.22))   # straight line -> road distance, by length
 
@@ -132,6 +134,8 @@ class Freight:
         self.pending = {}                    # places request id -> (job id, stop index)
         self._asked_models = 0
         self._hello_at = 0.0
+        self.mod_ver = None                  # what the running game's mod says it is (None: not heard yet)
+        self._born = time.time()
         self._models_part = []
 
     # ------------------------------------------------------------------ plumbing
@@ -514,11 +518,13 @@ class Freight:
         offer = self._find_offer(oid)
         if not offer:
             return False, "That job is gone: pick another from the board"
+        if not self.connected():
+            return False, "Start BeamNG and load BeamNG.Earth's world first"
+        if self.mod_old():
+            return False, "The game is running an older BeamDeck mod. Press Ctrl+L in BeamNG (or restart it), then take the job again."
         ok, why = self.fits(offer)
         if not ok:
             return False, why
-        if not self.connected():
-            return False, "Start BeamNG and load BeamNG.Earth's world first"
         cargo = D.CARGO_BY_ID[offer["cargo"]]
         self.summary = None
         pts = [dict(offer["from"])] + [dict(s) for s in offer["stops"]]
@@ -709,10 +715,21 @@ class Freight:
             j["mins"] = max(10, round(total / 60))
         j["await_route"] = False
 
-    def on_hello(self):
+    def mod_old(self):
+        """True when the game is running an older copy of the mod than this helper needs (reload it with Ctrl+L). Right
+        after the helper starts the version is not known yet, which only counts as old after a short while."""
+        if not self.connected():
+            return False
+        if self.mod_ver is not None:
+            return self.mod_ver < MOD_REQUIRED
+        return time.time() - max(self._hello_at, self._born) > 12
+
+    def on_hello(self, m=None):
         """The game says hello every 5 s. After a silence the game restarted: ask for the truck list, and put a running
         job's markers and route back."""
         now = time.time()
+        if m is not None:
+            self.mod_ver = int(m.get("rr", 0) or 0)
         restarted = now - self._hello_at > 12
         self._hello_at = now
         if (not self.models or now - self.models_at > 86400) and now - self._asked_models > 60:
@@ -752,9 +769,13 @@ class Freight:
             elif now - j.get("_move_say", 0) > 10:
                 j["_move_say"] = now
                 self.say("Stay stopped while it loads.", "warn", 4, False)
-            if j["load_left"] <= 0 and (j.get("loaded_event") or now - j["load_at"] > j["load_s"] + 45):
+            if j["load_left"] <= 0 and not j.get("loaded_event"):
+                j["stage"] = ("Waiting for the game: it runs an older BeamDeck mod, press Ctrl+L in BeamNG"
+                              if self.mod_old() else "Waiting for the game to finish loading…")
+            if j["load_left"] <= 0 and (j.get("loaded_event") or now - j["load_at"] > j["load_s"] + LOAD_WAIT_S):
                 if not j.get("loaded_event"):
-                    self.say("The game did not confirm the load. Hook up or load by hand if needed.", "warn", 7)
+                    self.say("The game did not confirm the load" + (" (an older mod is running: press Ctrl+L)" if self.mod_old() else "")
+                             + ". Hook up or load by hand if needed.", "warn", 8)
                 self._start_driving()
             return
         if self.state != "driving":
@@ -850,8 +871,8 @@ class Freight:
                     "mass": m.get("mass"), "tr": m.get("tr"), "boost": m.get("boost"), "check": m.get("chk"),
                     "lowfuel": m.get("lowf"), "model": m.get("model"), "heading": m.get("heading"),
                     # the control panel: which controls this truck has, and where they are set
-                    "has": has, "dm": m.get("dm") or {}, "ret": m.get("ret"), "retOn": m.get("retOn"),
-                    "retS": m.get("retS"), "cb": m.get("cb"), "cbOn": m.get("cbOn"), "cc": m.get("cc"),
+                    "has": has, "dm": m.get("dm") or {}, "ret": m.get("ret"), "retL": m.get("retL"), "retA": m.get("retA"),
+                    "retAuto": m.get("retAuto"), "cb": m.get("cb"), "cbL": m.get("cbL"), "cbOn": m.get("cbOn"), "cc": m.get("cc"),
                     "ccT": round(m["ccT"] * 3.6) if m.get("ccT") else None, "pto": m.get("ptoRpm"),
                     "raised": m.get("raised"), "mix": m.get("mix")}
 
@@ -939,6 +960,11 @@ class Freight:
         if a == "recouple":
             self.send([{"cmd": "freightRecouple"}])
             return True, ""
+        if a == "skip_loading":
+            if self.state != "loading":
+                return False, "Nothing is loading"
+            self._start_driving()
+            return True, ""
         if a == "skip_to_pickup":
             if self.state != "to_pickup":
                 return False, "Not on the way to a pickup"
@@ -1021,6 +1047,7 @@ class Freight:
         return {"state": self.state, "connected": self.connected(), "truck": self.truck, "job": self._job_view(),
                 "summary": self.summary, "tel": self.tel if self.connected() else {}, "v": self.v,
                 "hub": self.market["hub"], "balance": self.stats["balance"], "jobs": self.stats["jobs"], "staging": self.staging,
+                "mod_old": self.mod_old(), "mod_ver": self.mod_ver,
                 "events": self.events[-6:], "garage": len(self.models), "caps": sorted(self.truck_caps())}
 
     def board(self):
