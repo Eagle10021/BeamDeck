@@ -385,14 +385,39 @@ local function trailerCount()
   return n
 end
 
--- every truck the game has (stock and mods) with its configs and the specs the game shows; one message a model
+-- every truck the game has (stock, mods and the player's own saved configs) with the specs the game shows and the key
+-- parts each config is built from; one message a model, one model a frame (reading every config's file at once would stall)
 local TRUCK_TYPES = {Truck = true, ["Heavy Machinery"] = true}
+local PART_KW = {"fifthwheel", "trailerhitch", "pintle", "towhitch", "ballhitch", "gooseneck", "flatbed", "cargobox", "upfit_box",
+                 "tanker", "dump", "mixer", "logging", "schoolbus", "citybus", "ambulance", "police", "firetruck"}
+local vehQueue, vehIdx = nil, 0
+
 local function specsOf(c)
   local y = c.Years
   return {power = c.Power, torque = c.Torque, weight = c.Weight, top = c["Top Speed"], drive = c.Drivetrain,
           trans = c.Transmission, body = c["Body Style"], fuel = c["Fuel Type"],
           years = type(y) == "table" and y.min and (tostring(y.min) .. "-" .. tostring(y.max or "")) or nil}
 end
+
+-- the parts of a config that say what the truck is (a fifth wheel, a flatbed, a tanker, a bus body...); custom configs
+-- have names that say nothing, but their parts do
+local function partsOf(model, key)
+  local ok, d = pcall(jsonReadFile, "/vehicles/" .. model .. "/" .. key .. ".pc")
+  if not ok or type(d) ~= "table" or type(d.parts) ~= "table" then return nil end
+  local out, seen = {}, {}
+  for _, v in pairs(d.parts) do
+    if type(v) == "string" and v ~= "" and not seen[v] then
+      local lv = v:lower()
+      for _, kw in ipairs(PART_KW) do
+        if lv:find(kw, 1, true) then seen[v] = true; out[#out + 1] = v; break end
+      end
+    end
+  end
+  table.sort(out)
+  while #out > 14 do table.remove(out) end
+  return out
+end
+
 local function listVehicles()
   local ok, list = pcall(function() return core_vehicles.getModelList(true).models end)
   local trucks = {}
@@ -402,19 +427,28 @@ local function listVehicles()
     end
   end
   if #trucks == 0 then send({type = "vehicles", first = true, last = true}); return end
-  for i, m in ipairs(trucks) do
+  vehQueue, vehIdx = trucks, 0
+end
+
+local function pumpVehicles()
+  if not vehQueue then return end
+  vehIdx = vehIdx + 1
+  local m = vehQueue[vehIdx]
+  if m then
     local okm, full = pcall(core_vehicles.getModel, m.key)
     local configs = {}
     if okm and type(full) == "table" and type(full.configs) == "table" then
       for key, c in pairs(full.configs) do
-        configs[#configs + 1] = {key = key, name = c.Configuration or c.Name or key, specs = specsOf(c)}
+        configs[#configs + 1] = {key = key, name = c.Configuration or c.Name or key, specs = specsOf(c),
+                                 source = type(c.Source) == "string" and c.Source or nil, parts = partsOf(m.key, key)}
       end
       table.sort(configs, function(a, b) return a.key < b.key end)
-      while #configs > 110 do table.remove(configs) end     -- one datagram per model
+      while #configs > 140 do table.remove(configs) end     -- one datagram per model
     end
-    send({type = "vehicles", first = i == 1, last = i == #trucks,
+    send({type = "vehicles", first = vehIdx == 1, last = vehIdx == #vehQueue,
           model = {model = m.key, brand = m.Brand, name = m.Name, type = m.Type, configs = configs}})
   end
+  if vehIdx >= #vehQueue then vehQueue = nil end
 end
 
 -- ---- the rig: the job's truck, teleported to the pickup, with a trailer that fits its hitch ----
@@ -1248,6 +1282,7 @@ end
 local function onUpdate(dtReal)
   receive()
   rigUpdate()
+  pumpVehicles()
   local a = api()
   if pendingGoto and os.clockhp() >= pendingGoto.at then
     local g = pendingGoto

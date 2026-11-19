@@ -29,6 +29,29 @@ ok(set(g[("percheron", "s310_4x2_flatbed_M")]["caps"]) >= {"flatbed", "drawbar"}
 ok(("us_semi", "t82_ramplow") not in g and not any(k[0] == "citybus" for k in g), "ramplow and buses are not freight trucks")
 ok(g[("percheron", "xl500_6x4_fifthwheel_m")]["fav"] and fr.garage()[0]["model"] == "percheron", "Percheron is the favourite, listed first")
 
+# --- custom configs saved by the player: arbitrary names, recognised from their parts
+def custom(model_name, key, parts, brand="B", name="N"):
+    return {"model": model_name, "brand": brand, "name": name, "type": "Truck",
+            "configs": [{"key": key, "name": key, "source": "Custom", "parts": parts, "specs": {}}]}
+fr2 = F.Freight(lambda c: None, tempfile.mkdtemp())
+cm = [custom("percheron", "ruck", ["percheron_trailerhitch", "percheron_upfit_platform_980_flatbed", "percheron_airtanks_R"], "Cherrier", "Percheron"),
+      custom("percheron", "bof road", ["percheron_upfit_cargobox_clearance_F"], "Cherrier", "Percheron"),
+      custom("us_semi", "Long", ["conventional_interior_fifthwheel", "us_semi_fifthwheel_top"], "Gavril", "T-Series"),
+      custom("us_semi", "Home", ["conventional_interior_fifthwheel", "us_semi_ballhitch", "us_semi_flatbed_lights", "us_semi_flatbed_rear_guard", "us_semi_flatbed_softtop"], "Gavril", "T-Series"),
+      custom("md_series", "busss", ["schoolbus_airtank", "schoolbus_body_c"], "Gavril", "MD-Series")]
+for i, md in enumerate(cm):
+    fr2.on_vehicles({"type": "vehicles", "first": i == 0, "last": i == len(cm) - 1, "model": md})
+cg = {(x["model"], x["key"]): x for x in fr2.garage()}
+ok(set(cg[("percheron", "ruck")]["caps"]) == {"flatbed", "drawbar"} and cg[("percheron", "ruck")]["custom"], "custom Percheron flatbed with an eye hitch is recognised from its parts")
+ok(cg[("us_semi", "Long")]["caps"] == ["tractor"], "custom T-Series with a fifth wheel plate is a tractor")
+ok(set(cg[("us_semi", "Home")]["caps"]) == {"flatbed", "light"}, "custom T-Series flatbed with a ball hitch")
+ok(("percheron", "bof road") in cg and cg[("percheron", "bof road")]["caps"] == [], "a custom config nothing is known about is still listed, to be set by hand")
+ok(("md_series", "busss") not in cg, "a custom school bus is not offered as a freight truck")
+fr2.set_override("percheron", "bof road", ["tractor"])
+ok(fr2.caps_of("percheron", "bof road") == {"tractor"}, "the player can set what an unknown custom config can do")
+fr2.select_truck("percheron", "ruck")
+ok(D.can_carry(fr2.truck_caps(), D.CARGO_BY_ID["drawbar_flat"]) and not D.can_carry(fr2.truck_caps(), D.CARGO_BY_ID["dryvan"]), "the custom flatbed takes drawbar jobs, not semi jobs")
+
 # --- the board: Ottawa market, the corridor towns, scenarios
 pose = lambda lat, lon, **k: {"type": "pose", "lat": lat, "lon": lon, "speed": 0, "gx": 0, "gy": 0, "heading": 90, **k}
 fr.update(pose(45.4215, -75.6972))

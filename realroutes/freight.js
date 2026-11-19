@@ -120,13 +120,13 @@ function paintGarage() {
     <div class="gmodel"><h3>${esc(g.t.brand)} ${esc(g.t.name)} <small>${g.items.length} config${g.items.length === 1 ? "" : "s"}${g.t.family === "eu" ? " · European" : ""}</small>
       <button class="star ${g.t.fav ? "on" : ""}" data-fav="${esc(g.t.model)}" title="Favourite">★</button></h3>
       ${g.items.map(t => `<button class="gcfg ${cur && cur.model === t.model && cur.config === t.key ? "sel" : ""}" data-m="${esc(t.model)}" data-k="${esc(t.key)}">
-        <b>${esc(t.label)}</b><span class="caps">${capChips(t.caps)}${t.override ? `<span class="cap warn">set by you</span>` : ""}</span></button>`).join("")}
+        <b>${esc(t.label)}${t.custom ? ` <span class="cap on">Custom</span>` : ""}</b><span class="caps">${t.caps.length ? capChips(t.caps) : `<span class="cap warn">Tap, then choose what it can do</span>`}${t.override ? `<span class="cap warn">set by you</span>` : ""}</span></button>`).join("")}
     </div>`).join("") : `<div class="empty">${fb.garage.length ? "No truck matches." : "No trucks yet. Start BeamNG with the BeamDeck mod, then press “Refresh from the game”."}</div>`;
   // the selected truck
   const t = cur && fb.garage.find(x => x.model === cur.model && x.key === cur.config);
   const fitN = fb.offers.filter(o => o.fits).length;
   $("fGarageSel").innerHTML = t ? `
-    <h1>${esc(t.brand)} ${esc(t.name)}</h1><div class="os" style="font-size:15px">${esc(t.label)}</div>
+    <h1>${esc(t.brand)} ${esc(t.name)}</h1><div class="os" style="font-size:15px">${esc(t.label)}${t.custom ? " · your saved config" : ""}</div>
     ${specRows(t.specs)}
     <div><div class="os" style="margin:6px 0">What this truck can do (tap to change if a mod truck is misread):</div>
       <div class="fchips" id="fCaps">${Object.keys(fb.needs).map(c => `<button class="${t.caps.includes(c) ? "on" : ""}" data-c="${c}">${esc(NEEDS[c] || c)}</button>`).join("")}</div>

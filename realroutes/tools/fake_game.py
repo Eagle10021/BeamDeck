@@ -16,6 +16,12 @@ def model(m, brand, name, keys, typ="Truck", power=420):
                                                                            "drive": "RWD", "trans": "Automatic (12-speed)", "body": "Cab-Over Truck"}} for k in keys]}
 
 
+def custom(m, brand, name, key, parts):
+    d = model(m, brand, name, [key])
+    d["configs"][0].update(source="Custom", parts=parts)
+    return d
+
+
 MODELS = [
     model("percheron", "Cherrier", "Percheron", ["xl500_6x4_fifthwheel_m", "xl450_4x2_fifthwheel_M", "s310_fifthwheel_m", "s310_4x2_flatbed_M",
           "l310_6x4_flatbed_M", "xl500_6x4_box_M", "s410_6x4_tanker_M", "s310_6x6_mixer_A"], power=500),
@@ -25,6 +31,12 @@ MODELS = [
     model("van", "Gavril", "H-Series", ["deliverytruck", "h15_ext_vanster"], power=190),
     model("pickup", "Gavril", "D-Series", ["d10_4wd_A", "d15_423sport_A"], power=300),
 ]
+# the player's saved configs share the model entry of their truck, like the game's own list
+_by = {m["model"]: m for m in MODELS}
+_by["percheron"]["configs"] += [c for md in (custom("percheron", "", "", "ruck", ["percheron_trailerhitch", "percheron_upfit_platform_980_flatbed"]),
+                                              custom("percheron", "", "", "bof road", ["percheron_upfit_cargobox_clearance_F"])) for c in md["configs"]]
+_by["us_semi"]["configs"] += [c for md in (custom("us_semi", "", "", "Long", ["conventional_interior_fifthwheel", "us_semi_fifthwheel_top"]),
+                                           custom("us_semi", "", "", "MudRunner", ["cabover_interior_fifthwheel", "us_semi_fifthwheel_top"])) for c in md["configs"]]
 NAMES = ["Costco Wholesale", "Canadian Tire", "Loblaws", "Shell", "Petro-Canada", "Home Hardware", "Tim Hortons Depot", "Metro", "Walmart Supercentre",
          "Giant Tiger", "Rona", "Independent Grocer", "Esso", "Sobeys"]
 

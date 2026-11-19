@@ -229,13 +229,50 @@ NOT_FREIGHT = re.compile(r"police|ambul|fire|derby|drag|race|rally|drift|bus|arm
 BUS_MODELS = {"citybus", "citybus2", "citybus3", "citybus5", "citybus6", "citybus7", "ecitybus", "zmkcitybus"}
 
 
-def classify(model, key, name="", model_type="Truck"):
+# What a config's own parts say it is. Custom configs have names that say nothing ("Home", "ruck"), but the parts they
+# are built from do: a fifth wheel plate, a trailer hitch, a flatbed deck, a tanker body, a bus body.
+NOT_FREIGHT_PARTS = re.compile(r"schoolbus|citybus|ambulance|police|firetruck", re.I)
+
+
+def classify_parts(parts):
+    """Rig classes from the key part names the mod reports for a config (empty set: nothing recognisable)."""
+    caps = set()
+    for p in parts or []:
+        q = p.lower()
+        if "interior" in q or "licenseplate" in q or "lights" in q or "clearance" in q or "strap" in q:
+            continue                                            # a switch, a plate or a lamp, not the part itself
+        if "fifthwheel" in q:
+            caps.add("tractor")
+        if "trailerhitch" in q or "pintle" in q:
+            caps.add("drawbar")
+        if "towhitch" in q or "ballhitch" in q or "gooseneck" in q:
+            caps.add("light")
+        if "flatbed" in q:
+            caps.add("flatbed")
+        if "cargobox" in q or "upfit_box" in q:
+            caps.add("box")
+        if "tanker" in q:
+            caps.add("tanker")
+        if "dump" in q:
+            caps.add("dump")
+        if "mixer" in q:
+            caps.add("mixer")
+        if "logging" in q:
+            caps.add("tractor")
+    return caps
+
+
+def is_bus_like(parts):
+    return any(NOT_FREIGHT_PARTS.search(p or "") for p in parts or [])
+
+
+def _by_name(model, key, name="", model_type="Truck", parts=None):
     """What this truck config can do, as a set of rig classes (see the module docstring). Empty: not a freight truck.
     Unknown mods fall back to their name; the console lets the player override the result."""
     k = f"{key} {name}".lower()
     m = (model or "").lower()
     caps = set()
-    if m in BUS_MODELS or "bus" in m:
+    if m in BUS_MODELS or "bus" in m or is_bus_like(parts):
         return caps
     if NOT_FREIGHT.search(k) and not re.search(r"fifth|fift|cargobox|box|flatbed|tanker|mixer|dump", k):
         return caps
@@ -298,6 +335,16 @@ def classify(model, key, name="", model_type="Truck"):
         if not caps and model_type in ("Truck", "Heavy Machinery"):
             caps.add("light")
     return caps
+
+
+def classify(model, key, name="", model_type="Truck", parts=None):
+    """What this truck config can do, as a set of rig classes (see the module docstring). The name and the parts are
+    both used: the parts decide for custom configs, the name fills in what a stock config's parts don't spell out.
+    Empty: not a freight truck, or a custom config nothing is known about (the console lets the player set it)."""
+    caps = _by_name(model, key, name, model_type, parts)
+    if is_bus_like(parts) or (model or "").lower() in BUS_MODELS:
+        return set()
+    return caps | classify_parts(parts)
 
 
 def family(model):

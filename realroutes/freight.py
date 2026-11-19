@@ -21,6 +21,7 @@ SPEEDING_KMH, SPEEDING_S = 25, 10  # over the posted limit by this much for this
 TICKET = 25.0
 LOST_WARN_S, LOST_FAIL_S = 3, 45   # trailer unhooked
 SLACK = 1.18
+MODELS_V = 2                       # version of the truck list the mod sends (2: key parts and the config's source)
 ROAD = ((40, 1.35), (200, 1.28), (1e9, 1.22))   # straight line -> road distance, by length
 
 NEED_LABEL = {"tractor": "a semi tractor", "box": "a box truck", "flatbed": "a flatbed truck", "tanker": "a tanker truck",
@@ -75,6 +76,8 @@ class Freight:
             self.models = saved.get("models", [])
             self.models_at = saved.get("models_at", 0)
             self.favourites = saved.get("favourites", self.favourites)
+            if saved.get("models_v") != MODELS_V:           # an older list lacks the parts and custom flags: ask again
+                self.models_at = 0
         except Exception:
             pass
         self.state = "idle"
@@ -96,7 +99,7 @@ class Freight:
     def _save(self):
         try:
             json.dump({"stats": self.stats, "truck": self.truck, "overrides": self.overrides, "models": self.models,
-                       "models_at": self.models_at, "favourites": self.favourites}, open(self.file + ".part", "w"))
+                       "models_at": self.models_at, "favourites": self.favourites, "models_v": MODELS_V}, open(self.file + ".part", "w"))
             os.replace(self.file + ".part", self.file)
         except OSError:
             pass
@@ -134,24 +137,38 @@ class Freight:
             self.v += 1
             self._save()
 
+    def _config(self, model, key):
+        for md in self.models:
+            if md["model"] == model:
+                c = next((c for c in md.get("configs", []) if c["key"] == key), None)
+                if c:
+                    return c, md
+        return None, None
+
     def caps_of(self, model, key, name="", mtype="Truck"):
         ov = self.overrides.get(f"{model}/{key}")
         if ov is not None:
             return set(ov)
-        return D.classify(model, key, name, mtype)
+        c, _ = self._config(model, key)
+        return D.classify(model, key, name, mtype, c.get("parts") if c else None)
 
     def garage(self):
         out = []
         for md in self.models:
             for c in md.get("configs", []):
+                custom = (c.get("source") or "") == "Custom"
+                has_override = f"{md['model']}/{c['key']}" in self.overrides
                 caps = self.caps_of(md["model"], c["key"], c.get("name", ""), md.get("type", "Truck"))
-                if not caps:
+                # the player's own saved configs always appear, even when nothing says what they are (set it by hand)
+                if not caps and not (custom or has_override):
+                    continue
+                if not caps and D.is_bus_like(c.get("parts")) and not has_override:
                     continue
                 out.append({"model": md["model"], "key": c["key"], "brand": md.get("brand", ""), "name": md.get("name", ""),
                             "label": c.get("name") or c["key"], "caps": sorted(caps), "family": D.family(md["model"]),
-                            "fav": md["model"] in self.favourites, "specs": c.get("specs", {}),
-                            "override": f"{md['model']}/{c['key']}" in self.overrides})
-        out.sort(key=lambda t: (not t["fav"], t["brand"], t["name"], t["label"]))
+                            "fav": md["model"] in self.favourites, "specs": c.get("specs", {}), "custom": custom,
+                            "source": c.get("source") or "", "override": has_override})
+        out.sort(key=lambda t: (not t["fav"], t["brand"], t["name"], not t["custom"], t["label"].lower()))
         return out
 
     def truck_caps(self):
