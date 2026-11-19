@@ -88,6 +88,7 @@ CONFIG_DEFAULT = {
     "browser": "",                      # empty = first Chromium-based browser found (for the launcher)
     "aa_transport": "usb",
     "aa_fps": 20,                       # Android Auto's picture on the car screens: frames a second (5-30)              # "usb" (like a real car, no developer mode) or "adb" (head unit server)
+    "output_sink": "",                  # Linux: where BeamDeck's window plays (empty = the system's default output)
     "mp_relay": "",                     # BeamMP shared music: the relay's address, e.g. ws://server:47140
     "mp_share": True,                   # send the car's music to the other players
     "mp_share_screen": True,            # show the car screen on this player's car in the other players' games
@@ -1288,6 +1289,61 @@ def window_pids():
     return out
 
 
+# ---------------------------------------------------------------- BeamDeck's own sound output (Linux)
+# The window plays the car's sound (music, Android Auto, app sound, Real Routes speech); Settings > Sound output can
+# keep it on one device whatever the system default is (e.g. wired earphones while Bluetooth is the default).
+out_moved = {}
+
+
+def list_outputs():
+    try:
+        sinks = json.loads(subprocess.run(["pactl", "-f", "json", "list", "sinks"], capture_output=True, text=True,
+                                          timeout=5).stdout or "[]")
+        default = subprocess.run(["pactl", "get-default-sink"], capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:
+        return {"outputs": [], "default": "", "chosen": config.get("output_sink", "")}
+    outs = [{"name": k["name"], "desc": k.get("description") or k["name"]} for k in sinks
+            if not str(k.get("name", "")).startswith("beamdeck_")]
+    return {"outputs": outs, "default": default, "chosen": config.get("output_sink", "")}
+
+
+def out_loop():
+    """Keeps the window's streams on the chosen output (Chromium opens a new stream now and then)."""
+    while True:
+        want = config.get("output_sink", "")
+        if not WINDOWS and (want or out_moved):
+            try:
+                names = {k["name"] for k in json.loads(subprocess.run(["pactl", "-f", "json", "list", "sinks"],
+                                                                      capture_output=True, text=True, timeout=5).stdout or "[]")}
+                idx = {}
+                for line in subprocess.run(["pactl", "list", "short", "sinks"], capture_output=True, text=True,
+                                           timeout=5).stdout.splitlines():
+                    f = line.split("\t")
+                    if len(f) > 1:
+                        idx[f[1]] = int(f[0])
+                mine = window_pids()
+                target = want if want in names else "@DEFAULT_SINK@"   # chosen device unplugged: the default
+                for si in sink_inputs():
+                    pr = si.get("properties", {})
+                    try:
+                        pid = int(pr.get("application.process.id", 0))
+                    except ValueError:
+                        pid = 0
+                    if pid not in mine:
+                        continue
+                    if target != "@DEFAULT_SINK@" and si.get("sink") == idx.get(target):
+                        continue
+                    if out_moved.get(si["index"]) == target:
+                        continue
+                    subprocess.run(["pactl", "move-sink-input", str(si["index"]), target], capture_output=True, timeout=5)
+                    out_moved[si["index"]] = target
+                if not want:
+                    out_moved.clear()                # back on the default: nothing more to keep
+            except Exception:
+                pass
+        time.sleep(1.5)
+
+
 def app_key(props):
     return props.get("application.process.binary") or props.get("application.name") or props.get("node.name") or "?"
 
@@ -1809,6 +1865,10 @@ def config_update(d):
         if k in d:
             config[k] = str(d[k]).strip()
     config["mp_relay"] = normalize_relay(config.get("mp_relay", ""))
+    if "output_sink" in d:
+        config["output_sink"] = str(d["output_sink"] or "").strip()
+        out_moved.clear()                            # move the window's streams now (back to the default too)
+        out_moved["reset"] = 1
     if "mp_share" in d:
         config["mp_share"] = bool(d["mp_share"])
     if "mp_share_screen" in d:
@@ -2184,6 +2244,8 @@ class H(BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
         if u.path == "/routes" or u.path.startswith("/routes/"):
             return self.routes("GET", u, q, {})
+        if u.path == "/audio/outputs":                # Settings > Sound output
+            return self.json(list_outputs())
         m = re.fullmatch(r"/say/(\d+)\.wav", u.path)          # a Real Routes announcement for the window to play
         if m:
             f = os.path.join(SAY_DIR, m.group(1) + ".wav")
@@ -2472,6 +2534,7 @@ if __name__ == "__main__":
     threading.Thread(target=map_watch, daemon=True).start()
     threading.Thread(target=appcap_loop, daemon=True).start()
     threading.Thread(target=np_loop, daemon=True).start()
+    threading.Thread(target=out_loop, daemon=True).start()
     if config["music_folders"]:
         threading.Thread(target=lib_scan, daemon=True).start()
     routes_start()

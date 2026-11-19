@@ -1549,6 +1549,23 @@
     </section>
 
     <section id="tab-settings">
+      <div class="card" id="outCard">
+        <div class="card-head">
+          <h2 class="card-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
+              <path d="M21 19a2 2 0 0 1-2 2h-1v-6h3zM3 19a2 2 0 0 0 2 2h1v-6H3z"></path>
+            </svg>
+            Sound Output
+          </h2>
+        </div>
+        <label class="field">BeamDeck plays on
+          <select id="cfOut"></select>
+        </label>
+        <div class="hint" id="cfOutHint">The car's music, Android Auto, app sound and Real Routes speech. "System default" follows whatever the PC uses.</div>
+      </div>
+
       <div class="card">
         <div class="card-head">
           <h2 class="card-title">
@@ -3014,6 +3031,22 @@
     $("themeToggle").onclick = () => applyTheme(opts.theme === "light" ? "dark" : "light");
     $("cfTheme").value = opts.theme || "dark";
     $("cfTheme").onchange = () => applyTheme($("cfTheme").value);
+    // Settings > Sound output (Linux): BeamDeck's helper keeps the window's streams on the chosen device
+    function loadOutputs() {
+      fetch("/audio/outputs").then(r => r.json()).then(d => {
+        if (!d.outputs.length) { $("outCard").style.display = "none"; return }   // Windows: not available
+        const sel = $("cfOut")
+        const def = (d.outputs.find(o => o.name === d.default) || {}).desc || "none"
+        sel.innerHTML = `<option value="">System default (${def})</option>` +
+          d.outputs.map(o => `<option value="${o.name}">${o.desc}</option>`).join("")
+        if (d.chosen && !d.outputs.some(o => o.name === d.chosen))
+          sel.innerHTML += `<option value="${d.chosen}">${d.chosen} (not connected: using the default)</option>`
+        sel.value = d.chosen || ""
+      }).catch(() => { $("outCard").style.display = "none" })
+    }
+    $("cfOut").onchange = () => fetch("/config", { method: "POST", body: JSON.stringify({ output_sink: $("cfOut").value }) })
+    $("cfOut").addEventListener("focus", loadOutputs)          // devices come and go: list them fresh
+    loadOutputs()
 
     // Initialize all slider fills and live listeners
     document.querySelectorAll('input[type="range"]').forEach(s => {
