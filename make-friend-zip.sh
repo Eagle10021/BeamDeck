@@ -25,6 +25,6 @@ else
 fi
 mkdir -p "$out"
 rm -f "$out/BeamDeck-Windows.zip"
-(cd "$tmp" && zip -q -r -X "$(cd "$out" && pwd)/BeamDeck-Windows.zip" BeamDeck)
+(cd "$tmp" && zip -q -r -X "$(cd "$out" && pwd)/BeamDeck-Windows.zip" BeamDeck -x '*__pycache__*')
 rm -rf "$tmp"
 echo "Built $(cd "$out" && pwd)/BeamDeck-Windows.zip (relay: $relay)"
