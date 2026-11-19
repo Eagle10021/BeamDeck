@@ -44,22 +44,41 @@ function setFTab(v) {
 $("fTruckChip").onclick = () => setFTab("garage");
 
 // ---------------------------------------------------------------- the board
+const canCarry = (caps, need) => need === "light" ? caps.includes("light") || caps.includes("box") : caps.includes(need);
+// what a job needs and which of the player's trucks can do it, with one tap to switch
+function altsFor(o) {
+  if (o.alts) return o.alts;
+  const hits = fb.garage.filter(t => canCarry(t.caps, o.needs));
+  return {n: hits.length, top: hits.slice(0, 3).map(t => ({model: t.model, key: t.key, name: t.name, label: t.label, custom: t.custom}))};
+}
+function swapHTML(o) {
+  if (o.fits) return "";
+  const a = altsFor(o), need = (NEEDS[o.needs] || o.needs).toLowerCase();
+  if (!a.n) return `<div class="os fneed">None of your trucks can do this: it needs ${esc(need)}. Mark a custom config in the Garage if it can.</div>`;
+  return `<div class="os fneed">Needs ${esc(need)}. Switch to: ${a.top.map(t => `<button class="cap swap" data-m="${esc(t.model)}" data-k="${esc(t.key)}">${esc(t.label)}${t.custom ? " ★" : ""}</button>`).join(" ")}${a.n > 3 ? ` <span class="muted">+${a.n - 3} more in the Garage</span>` : ""}</div>`;
+}
+
 function offerHTML(o) {
   const route = [o.from.name, ...o.stops.map(s => s.name)];
   const shown = route.length > 5 ? [...route.slice(0, 2), `… ${route.length - 3} more …`, route[route.length - 1]] : route;
   const tags = [`<span class="cap ${o.fits ? "fit" : "warn"}">${esc(NEEDS[o.needs] || o.needs)}</span>`];
   if (o.kind === "scenario") tags.unshift(`<span class="cap on">Scenario</span>`);
+  if (o.tailored) tags.unshift(`<span class="cap fit">Made for your truck</span>`);
   if (o.kind === "custom") tags.unshift(`<span class="cap on">Your route</span>`);
   if (o.fragile >= 0.4) tags.push(`<span class="cap warn">Fragile</span>`);
   if (o.hazard) tags.push(`<span class="cap hot">Dangerous goods</span>`);
   if (o.rush) tags.push(`<span class="cap hot">Rush</span>`);
   if (o.kind === "long") tags.push(`<span class="cap">Long haul</span>`);
   if (o.stops.length > 1) tags.push(`<span class="cap">${o.stops.length} drops</span>`);
+  if (o.contract_label) tags.push(`<span class="cap ${o.contract === "rush" ? "hot" : "warn"}">${esc(o.contract_label)}</span>`);
+  if (fb && o.created && o.kind !== "scenario" && o.kind !== "custom" && fb.now - o.created < 150) tags.unshift(`<span class="cap on">New</span>`);
+  if (fb && o.expires && o.expires - fb.now < 240) tags.push(`<span class="cap hot">Leaves in ${Math.max(1, Math.round((o.expires - fb.now) / 60))} min</span>`);
   return `<div class="offer ${o.fits ? "" : "nofit"} ${o.kind === "scenario" ? "scen" : ""}">
     <div class="oh"><div class="oi">${o.icon}</div><div><div class="ot">${esc(o.title)}</div><div class="os">${esc(o.load)} · ${o.weight} t</div></div></div>
     <div class="or">${shown.map(esc).join("<i>→</i>")}</div>
     ${o.blurb ? `<div class="os">${esc(o.blurb)}</div>` : ""}
     <div class="tags">${tags.join("")}</div>
+    ${swapHTML(o)}
     <div class="on"><div class="pay">${fm(o.pay)}</div><span>${o.km} km</span><span>${fdur(o.mins)}</span>
       <button class="take" data-id="${o.id}" ${o.fits ? "" : "disabled"}>${o.fits ? "Take job" : esc(o.why || "Not for this truck")}</button></div>
   </div>`;
@@ -81,14 +100,18 @@ function paintJobs() {
              long: o => o.kind === "long", scenario: o => o.kind === "scenario" || o.kind === "custom"};
   document.querySelectorAll("#fFilters button").forEach(b => b.classList.toggle("on", b.dataset.f === fFilter));
   const list = fb.offers.filter(F[fFilter] || F.all);
-  $("fJobsCount").textContent = `${list.length} of ${fb.offers.length} jobs` + (fb.truck ? "" : " · pick a truck in the Garage");
-  $("fJobsList").innerHTML = list.length ? list.map(offerHTML).join("") :
-    `<div class="empty">${fFilter === "fits" ? "Nothing here fits your truck. Try All, another town, or another truck." : "No jobs of this kind here. Try another town."}</div>`;
+  $("fJobsCount").textContent = `${list.length} of ${fb.offers.length} jobs`;
+  const banner = !fb.truck ? `<div class="fbanner"><b>No truck picked yet.</b> Every job needs one: choose it in the Garage (your own saved configs are listed first, marked Custom).<button class="go" id="fToGarage" style="padding:10px 22px;font-size:16px">Open the Garage</button></div>` : "";
+  $("fJobsList").innerHTML = banner + (list.length ? list.map(offerHTML).join("") :
+    `<div class="empty">${fFilter === "fits" ? "Nothing here fits your truck. Try All, another town, or another truck." : "No jobs of this kind here. Try another town."}</div>`);
+  const g2 = $("fToGarage"); if (g2) g2.onclick = () => setFTab("garage");
 }
 $("fFilters").onclick = e => { const b = e.target.closest("button"); if (!b) return; fFilter = b.dataset.f; try { localStorage.setItem("rrFFilter", fFilter); } catch {} paintJobs(); };
 $("fHub").onchange = () => fetchBoard($("fHub").value);
 $("fRefresh").onclick = async () => { await fpost({action: "market", hub: fb && fb.hub, refresh: true}); fetchBoard(); };
 $("fJobsList").onclick = async e => {
+  const sw = e.target.closest(".swap");
+  if (sw) { await fpost({action: "truck", model: sw.dataset.m, config: sw.dataset.k}); ftoast("Switched truck: the board now shows jobs it can carry"); return fetchBoard(); }
   const b = e.target.closest(".take"); if (!b || b.disabled) return;
   b.disabled = true;
   const r = await fpost({action: "start", offer: b.dataset.id});
@@ -172,7 +195,7 @@ function paintPlan() {
     <div class="row"><div><label>From</label><select id="pFrom">${opts(from)}</select></div><div style="font-size:26px;padding-top:18px">→</div><div><label>To</label><select id="pTo">${opts(to)}</select></div></div>
     ${between.length ? `<div><label>Drop-offs on the way (towns between, in driving order)</label><div class="fchips" id="pVia">${between.map(b => `<button data-t="${esc(b)}" class="${fPlan.via.includes(b) ? "on" : ""}">${esc(b)}</button>`).join("")}</div></div>`
       : `<div class="os">Pick two towns on the Ottawa – Toronto corridor to add drops in the towns between them.</div>`}
-    <div><label>Cargo</label><select id="pCargo">${cargo.map(c => `<option value="${c.id}" ${c.id === fPlan.cargo ? "selected" : ""}>${c.icon} ${esc(c.name)} — ${esc(NEEDS[c.needs])}${c.fits ? "" : " (not for this truck)"}</option>`).join("")}</select></div>
+    <div><label>Cargo</label><select id="pCargo">${cargo.map(c => `<option value="${c.id}" ${c.id === fPlan.cargo ? "selected" : ""}>${c.icon} ${esc(c.name)} — ${c.fits ? "your truck can" : "needs " + esc((NEEDS[c.needs] || c.needs).toLowerCase())}</option>`).join("")}</select></div>
     <div class="row"><button class="go" id="pGo" style="padding:12px 26px;font-size:18px">Plan this job</button></div>
     <div id="pResult"></div>`;
   $("pFrom").onchange = () => { fPlan.from = $("pFrom").value; fPlan.via = []; paintPlan(); };
@@ -186,7 +209,11 @@ function paintPlan() {
     if (!r.ok || !r.offer) return;
     const o = r.offer; const fits = fb.cargo.find(c => c.id === o.cargo)?.fits;
     $("pResult").innerHTML = `<div class="fgrid" style="grid-template-columns:minmax(380px,520px)">${offerHTML({...o, fits: !!fits, why: fits ? "" : "Needs " + (fb.needs[o.needs] || o.needs)})}</div>`;
-    $("pResult").onclick = async ev => { const b = ev.target.closest(".take"); if (b && !b.disabled) { b.disabled = true; const x = await fpost({action: "start", offer: o.id}); if (!x.ok) b.disabled = false; } };
+    $("pResult").onclick = async ev => {
+      const sw = ev.target.closest(".swap");
+      if (sw) { await fpost({action: "truck", model: sw.dataset.m, config: sw.dataset.k}); await fetchBoard(); return $("pGo").click(); }   // plan it again for the new truck
+      const b = ev.target.closest(".take"); if (b && !b.disabled) { b.disabled = true; const x = await fpost({action: "start", offer: o.id}); if (!x.ok) b.disabled = false; }
+    };
   };
 }
 

@@ -132,3 +132,7 @@ body.fdriving .modes { display: none; }
 #freight.driving .fbar { display: none; }
 #fSearch { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 12px; padding: 9px 14px; font: inherit; font-size: 16px; outline: 0; }
 #fSearch:focus { border-color: var(--accent); }
+.fbanner { grid-column: 1 / -1; display: flex; align-items: center; gap: 18px; background: var(--late-container); color: var(--on-late-container); border-radius: 18px; padding: 14px 18px; font-size: 16px; }
+.fbanner b { font-weight: 800; } .fbanner .go { margin-left: auto; flex: none; }
+.fneed { margin-top: 2px; line-height: 1.7; } .cap.swap { cursor: pointer; background: var(--md-secondary-container); color: var(--md-on-secondary-container); font-size: 13px; padding: 4px 12px; }
+.cap.swap:active { scale: .95; }

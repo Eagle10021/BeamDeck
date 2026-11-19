@@ -70,9 +70,40 @@ ok("Brockville" in D.HUB and "Kingston" in D.HUB and "Belleville" in D.HUB, "in-
 ok(any(o["kind"] == "regional" for o in b["offers"]) and any(o["kind"] == "long" for o in b["offers"]), "regional and long-haul jobs generated")
 ok(all(o["fits"] == (D.can_carry(fr.truck_caps(), D.CARGO_BY_ID[o["cargo"]])) for o in b["offers"]), "every offer says whether the truck fits")
 
+# --- jobs made for the selected truck are mixed in with the general ones
+tail = [o for o in b["offers"] if o.get("tailored")]
+ok(len(tail) >= F.TAILORED_MIN and all(o["fits"] for o in tail), f"{len(tail)} jobs are made for the truck and every one fits it")
+ok(len({o["cargo"] for o in tail}) >= 3, f"...in a variety of cargo ({sorted({o['cargo'] for o in tail})})")
+ok(any(not o["fits"] for o in b["offers"]) and any(not o.get("tailored") and o["fits"] for o in b["offers"]), "...mixed in with general jobs (some fit by chance, some don't)")
+fr_none = F.Freight(lambda c: None, tempfile.mkdtemp()); fr_none.pose = {"lat": 45.4, "lon": -75.7, "_at": clock[0]}
+fr_none.set_market("Ottawa", refresh=True)
+ok(not any(o.get("tailored") for o in fr_none.market["offers"]), "with no truck picked nothing is tailored")
+
+# --- pay is worth the drive, and the market is alive
+reg = [o for o in b["offers"] if o["kind"] != "scenario"]
+loc = [o["pay"] for o in reg if o["kind"] == "local"]; lng = [o["pay"] for o in reg if o["kind"] == "long"]
+ok(min(loc) >= 150 and min(lng) >= 1000, f"pay is worth it: local from ${min(loc)}, long haul from ${min(lng)}")
+ok(by_id["express"]["pay"] >= 2500, f"the Ottawa → Toronto Express pays ${by_id['express']['pay']}")
+ok(any(o["contract"] for o in reg), "some jobs carry an express or high-value contract")
+n0 = len(fr.market["offers"]); ids0 = {o["id"] for o in fr.market["offers"]}; v0 = fr.v
+clock[0] += 120; fr.view()
+ok(len(fr.market["offers"]) > n0 and fr.v > v0, f"new random jobs turn up over time ({n0} → {len(fr.market['offers'])})")
+clock[0] += 2000; fr.view()
+ok(not any(o["expires"] and o["expires"] < clock[0] for o in fr.market["offers"]) and any(o["created"] > clock[0] - 5 for o in fr.market["offers"]), "old jobs leave the board and fresh ones replace them")
+ok(any(o["scenario"] for o in fr.market["offers"]), "themed scenarios stay on the board")
+fr.set_market("Ottawa", refresh=True)
+
 # --- plan a custom job through Brockville
 okp, off = fr.plan({"from": "Ottawa", "to": "Kingston", "via": ["Brockville"], "cargo": "dryvan"})
 ok(okp and [s["name"] for s in off["stops"]] == ["Brockville", "Kingston"], "custom route Ottawa → Brockville → Kingston")
+
+# --- the custom flatbed with an eye hitch gets Ottawa → Toronto work, and the others say who can do them
+fr.models[0]["configs"].append({"key": "ruck", "name": "Ruck", "source": "Custom", "specs": {}, "parts": ["percheron_trailerhitch", "percheron_upfit_platform_980_flatbed"]})
+fr.select_truck("percheron", "ruck"); bb = fr.board()
+fl = {o["scenario"]: o for o in bb["offers"] if o["scenario"]}
+ok(all(fl[k]["fits"] and fl[k]["stops"][-1]["name"] == "Toronto" for k in ("express_flatbed", "express_drawbar")), "Ottawa → Toronto flatbed and drawbar-flatbed jobs fit the Ruck")
+ok(fl["corridor_flatbed"]["fits"] and len(fl["corridor_flatbed"]["stops"]) >= 4, "a corridor run with several drops fits the flatbed too")
+ok(not fl["express"]["fits"] and fl["express"]["alts"]["n"] >= 1 and fl["express"]["alts"]["top"][0]["key"] == "xl500_6x4_fifthwheel_m", "the semi job says which of the player's trucks can do it")
 
 # --- a different truck: the rigid flatbed sees the drawbar jobs, not semi jobs
 fr.select_truck("percheron", "s310_4x2_flatbed_M")
@@ -81,8 +112,11 @@ ok(any(o["fits"] and o["needs"] == "drawbar" for o in b2["offers"]) or any(c["fi
 ok(not [c for c in b2["cargo"] if c["needs"] == "tractor" and c["fits"]], "flatbed truck does not fit semi cargo")
 
 # --- run a job end to end
-fr.select_truck("percheron", "xl500_6x4_fifthwheel_m")
+fr.select_truck("percheron", "xl500_6x4_fifthwheel_m")               # a new truck rebuilds the board
+b = fr.board()
+by_id = {o["scenario"]: o for o in b["offers"] if o["scenario"]}
 offer = by_id["corridor_run"]
+fr.update(pose(45.4215, -75.6972))                                    # the game is still talking (the clock jumped above)
 sent.clear()
 ok(fr.start(offer["id"]) == (True, ""), "start the corridor run")
 ok(fr.state == "resolving" and len(cmds("places")) == 1 + len(offer["stops"]), "asks the game for a place at the pickup and each drop")

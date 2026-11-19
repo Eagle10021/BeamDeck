@@ -49,6 +49,33 @@ ok(wait(lambda: len(get("api/freight/board")["garage"]) > 8, 15, "truck list"), 
 post("api/prefs", {"mode": "freight"})
 
 shot("1_board_no_truck")
+# the player taps their own saved config in the Garage (no API shortcut): the truck must be selected and the board must fill with jobs it can do
+B.goto("about:blank"); B.goto(BASE + "#freight/garage"); B.wait(3.5)
+c = B.center('.gcfg[data-k="ruck"]')
+ok(c is not None, "the custom Ruck config is listed in the Garage")
+B.press(c[0], c[1], 0.06); B.wait(1.2)
+ok((fr()["truck"] or {}).get("config") == "ruck", "tapping the Ruck selects it")
+bb = get("api/freight/board")
+fitting = [o for o in bb["offers"] if o["fits"]]
+ok(set(bb["caps"]) == {"drawbar", "flatbed"}, f"the Ruck is a flatbed with an eye hitch ({bb['caps']})")
+ok(len(fitting) >= len(bb["offers"]) * 0.5, f"the board was rebuilt for it: {len(fitting)} of {len(bb['offers'])} jobs fit")
+print("   fitting jobs:", sorted({o["title"] for o in fitting}))
+shot("2a_board_ruck")
+# the planner: Ottawa → Toronto with a semi cargo says what it needs and which of the player's trucks can do it
+B.goto("about:blank"); B.goto(BASE + "#freight/plan"); B.wait(3.5)
+B.js("(() => { const s = document.querySelector('#pCargo'); s.value = 'dryvan'; s.dispatchEvent(new Event('change')); })()"); B.wait(0.5)
+c = B.center("#pGo"); B.press(c[0], c[1], 0.05); B.wait(1.2)
+ok(B.js("!!document.querySelector('#pResult .swap')"), "the planner says which of the player's trucks can do a job the Ruck can't")
+txt = B.js("document.querySelector('#pResult .fneed').innerText")
+print("   planner says:", txt)
+ok("semi tractor" in txt.lower(), "...and what the job needs")
+B.shot(os.path.join(out, "4b_plan_needs.png"))
+c = B.center("#pResult .swap"); B.press(c[0], c[1], 0.05); B.wait(1.8)
+ok((fr()["truck"] or {}).get("config") != "ruck", "one tap switches to a truck that can do it")
+ok(B.js("!!document.querySelector('#pResult .take') && !document.querySelector('#pResult .take').disabled"), "and the planned job is now ready to take")
+B.shot(os.path.join(out, "4c_plan_switched.png"))
+B.goto("about:blank"); B.goto(BASE + "#freight/garage"); B.wait(3)
+c = B.center('.gcfg[data-k="ruck"]'); B.press(c[0], c[1], 0.06); B.wait(1.0)     # back to the Ruck for the rest of the test
 b = get("api/freight/board")
 perch = next(t for t in b["garage"] if t["model"] == "percheron" and "fifthwheel" in t["key"])
 ok(post("api/freight", {"action": "truck", "model": perch["model"], "config": perch["key"]})["ok"], "pick the Percheron tractor")

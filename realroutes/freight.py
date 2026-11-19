@@ -21,6 +21,14 @@ SPEEDING_KMH, SPEEDING_S = 25, 10  # over the posted limit by this much for this
 TICKET = 25.0
 LOST_WARN_S, LOST_FAIL_S = 3, 45   # trailer unhooked
 SLACK = 1.18
+BASE_FEE, RATE_X = 150, 1.6        # pay: a base fee plus km x the cargo's rate x RATE_X, scaled by weight and bonuses
+MARKET_TARGET, MARKET_MAX = 18, 28 # regular jobs kept on the board (new ones appear over time, old ones leave)
+NEW_EVERY_S = (40, 90)             # a new random job appears this often
+LIFE_S = (600, 1800)               # how long a regular job stays on the board
+CONTRACTS = {"rush": {"title": "Express", "mins": 0.72, "pay": 1.35, "label": "Express contract +35%"},
+             "valuable": {"title": "High-value", "frag": 0.35, "pay": 1.45, "label": "High-value cargo +45%"}}
+TAILORED = 0.45                    # share of generated jobs made for the selected truck (the rest are general)
+TAILORED_MIN = 6                   # a fresh board always has at least this many
 MODELS_V = 2                       # version of the truck list the mod sends (2: key parts and the config's source)
 ROAD = ((40, 1.35), (200, 1.28), (1e9, 1.22))   # straight line -> road distance, by length
 
@@ -85,7 +93,7 @@ class Freight:
         self.summary = None
         self.pose = None
         self.tel = {}
-        self.market = {"hub": None, "offers": [], "built": 0, "n": 0, "at": None}
+        self.market = {"hub": None, "offers": [], "built": 0, "n": 0, "at": None, "next_new": 0}
         self.custom = {}                     # offers the player planned: id -> offer
         self.events = []
         self.v = 1                           # bumped when the board's contents change, so the console refetches it
@@ -184,6 +192,7 @@ class Freight:
         label = found["label"] if found else key
         self.truck = {"model": model, "config": key, "label": label,
                       "name": f"{found['brand']} {found['name']}".strip() if found else model}
+        self.market["offers"] = []                  # rebuilt on the next look, filled with jobs this truck can carry
         self.v += 1
         self._save()
         return True, ""
@@ -195,6 +204,7 @@ class Freight:
             self.overrides[k] = caps
         else:
             self.overrides.pop(k, None)
+        self.market["offers"] = []
         self.v += 1
         self._save()
 
@@ -217,6 +227,8 @@ class Freight:
         return (p["lat"], p["lon"]) if p and p.get("lat") is not None else None
 
     def set_market(self, hub=None, refresh=False):
+        """(Re)build the market for a town: when the town changes, on request, when the truck changed (so the board is
+        filled with jobs it can carry), or when the board is old."""
         if hub and hub not in D.HUB:
             return False, "Unknown town"
         if not hub:
@@ -224,7 +236,8 @@ class Freight:
             hub = self.market["hub"] or (self._near_hub(*me) if me else "Ottawa")
         if refresh:
             self.market["n"] += 1
-        if hub != self.market["hub"] or refresh or not self.market["offers"]:
+        stale = time.time() - self.market["built"] > 900
+        if hub != self.market["hub"] or refresh or stale or not self.market["offers"]:
             self.market["hub"] = hub
             self.market["offers"] = self._build(hub)
             self.market["built"] = time.time()
@@ -271,18 +284,26 @@ class Freight:
             return [c[1] for c in cands]
         return [cands[int((k + 0.5) * len(cands) / n)][1] for k in range(n)]
 
-    def _make_offer(self, rng, cargo, origin, stops, kind, scen=None, pay_mult=1.0, title=None, blurb=None, mins_mult=1.0):
+    def _make_offer(self, rng, cargo, origin, stops, kind, scen=None, pay_mult=1.0, title=None, blurb=None, mins_mult=1.0,
+                    contract=None):
+        now = time.time()
         pts = [origin] + stops
         straight = sum(dist_m((a["lat"], a["lon"]), (b["lat"], b["lon"])) for a, b in zip(pts, pts[1:]))
         km = max(road_km(straight), 3.0)
         speed = 36 if km < 30 else 58 if km < 150 else 76
-        mins = max(12, round((km / speed * 60 + 10 + 4 * len(stops)) * SLACK * mins_mult))
-        fam = "us"
+        mins = (km / speed * 60 + 10 + 4 * len(stops)) * SLACK * mins_mult
+        fragile, rush = cargo["fragile"], bool(cargo.get("rush"))
+        con = CONTRACTS.get(contract)
+        if con:
+            mins *= con.get("mins", 1.0)
+            fragile = min(0.9, fragile + con.get("frag", 0.0))
+            pay_mult *= con["pay"]
+            rush = rush or contract == "rush"
+        mins = max(12, round(mins))
         trailer = None
-        for f in ("us", "eu"):
-            if (cargo.get("trailers") or {}).get(f):
-                trailer = cargo["trailers"][f][0]
-                fam = f
+        for fam in ("us", "eu"):
+            if (cargo.get("trailers") or {}).get(fam):
+                trailer = cargo["trailers"][fam][0]
                 break
         weight = rng.uniform(*cargo["weight"])
         if trailer:
@@ -290,56 +311,115 @@ class Freight:
             if mt:
                 weight = int(mt.group(1)) / 1000
         weight = round(weight, 1)
-        pay = (50 + km * cargo["rate"]) * (0.85 + weight / 60) * pay_mult
+        pay = (BASE_FEE + km * cargo["rate"] * RATE_X) * (0.9 + weight / 40) * pay_mult
         if km >= 300:
-            pay *= 1.1
+            pay *= 1.15
         pay = round5(pay)
+        ttl = None if kind in ("scenario", "custom") else rng.uniform(*LIFE_S)
         return {"id": f"o{rng.getrandbits(32):08x}", "cargo": cargo["id"], "scenario": scen, "icon": cargo["icon"],
-                "title": title or cargo["name"], "load": rng.choice(cargo["loads"]), "kind": kind,
-                "from": origin, "stops": stops, "km": round(km), "mins": mins, "pay": pay, "weight": weight,
-                "needs": cargo["needs"], "fragile": cargo["fragile"], "hazard": bool(cargo.get("hazard")),
-                "rush": bool(cargo.get("rush")), "blurb": blurb or "", "trailer": trailer[1] if trailer else None}
+                "title": title or (f"{con['title']} {cargo['name'].lower()}" if con else cargo["name"]), "load": rng.choice(cargo["loads"]),
+                "kind": kind, "from": origin, "stops": stops, "km": round(km), "mins": mins, "pay": pay, "weight": weight,
+                "needs": cargo["needs"], "fragile": fragile, "hazard": bool(cargo.get("hazard")), "rush": rush,
+                "blurb": blurb or "", "trailer": trailer[1] if trailer else None, "contract": contract,
+                "contract_label": con["label"] if con else None, "created": now, "expires": now + ttl if ttl else None}
 
-    def _build(self, hubname):
-        rng = random.Random(f"{hubname}|{int(time.time() // 900)}|{self.market['n']}")
+    def _regular(self, rng, hubname, kind=None, tailored=None):
+        """One random job round a market town: inside the town, to a town nearby, or a long haul. Some start in a
+        neighbouring town, and some carry a contract (express or high-value) that pays more for more risk. A tailored
+        job is made for the selected truck (cargo it is built to carry); the others are general and mix in."""
+        kind = kind or rng.choices(("local", "regional", "long"), (0.3, 0.45, 0.25))[0]
         me = self.truck_caps()
-        origin = self._hub_pt(hubname)
-        here = (origin["lat"], origin["lon"])
-        hubs = sorted((h for h in D.HUBS if h[0] != hubname), key=lambda h: dist_m(here, (h[1], h[2])))
-        by = lambda lo, hi: [h[0] for h in hubs if lo <= dist_m(here, (h[1], h[2])) / 1000 * 1.25 <= hi]
-        offers = []
+        here = (D.HUB[hubname]["lat"], D.HUB[hubname]["lon"])
+        if tailored is None:
+            tailored = bool(me) and rng.random() < TAILORED
+        made_for = []
 
-        def pick_cargo(local=False, port_here=False):
-            pool = [c for c in D.CARGO if not (c.get("port") and "port" not in D.HUB[hubname]["tags"])
-                    and (not c.get("local") or True)]
+        def pick(local=False, origin_hub=hubname):
+            pool = [c for c in D.CARGO if not (c.get("port") and "port" not in D.HUB[origin_hub]["tags"])]
             if local:
                 pool = [c for c in pool if c.get("local")] or pool
             fit = [c for c in pool if D.can_carry(me, c)] if me else []
-            if fit and rng.random() < 0.7:
+            if tailored and fit:
+                made_for.append(True)
                 return rng.choice(fit)
-            return rng.choice(pool)
+            return rng.choice(fit) if fit and rng.random() < 0.3 else rng.choice(pool)
 
-        # local: inside the town (drops spread round it)
-        for _ in range(4):
-            c = pick_cargo(local=True)
+        contract = rng.choice(("rush", "valuable")) if rng.random() < 0.3 else None
+        if kind == "local":
+            c = pick(local=True)
             n = rng.randint(*c["stops"]) if c.get("stops") else 1
             stops = [self._local_pt(rng, hubname, rng.choice(["customer", "site", "yard"])) for _ in range(n)]
-            offers.append(self._make_offer(rng, c, self._local_pt(rng, hubname, "depot"), stops, "local"))
-        # regional: the towns within reach
-        for dest in rng.sample(by(30, 160), min(6, len(by(30, 160)))):
-            c = pick_cargo()
-            offers.append(self._make_offer(rng, c, origin, [self._hub_pt(dest)], "regional"))
-        # long haul
-        far = by(160, 800)
-        for dest in rng.sample(far, min(4, len(far))):
-            c = pick_cargo()
-            offers.append(self._make_offer(rng, c, origin, [self._hub_pt(dest)], "long"))
+            o = self._make_offer(rng, c, self._local_pt(rng, hubname, "depot"), stops, "local", contract=contract)
+            o["tailored"] = bool(made_for)
+            return o
+        origin_hub = hubname
+        if rng.random() < 0.4:
+            near = [h[0] for h in D.HUBS if h[0] != hubname and dist_m(here, (h[1], h[2])) / 1000 * 1.25 <= 90]
+            if near:
+                origin_hub = rng.choice(near)
+        oh = D.HUB[origin_hub]
+        ohere = (oh["lat"], oh["lon"])
+        lo, hi = (30, 160) if kind == "regional" else (160, 800)
+        cands = [h[0] for h in D.HUBS if h[0] != origin_hub and lo <= dist_m(ohere, (h[1], h[2])) / 1000 * 1.25 <= hi]
+        if not cands:
+            return None
+        c = pick(origin_hub=origin_hub)
+        o = self._make_offer(rng, c, self._hub_pt(origin_hub), [self._hub_pt(rng.choice(cands))], kind, contract=contract)
+        o["tailored"] = bool(made_for)
+        return o
+
+    def _build(self, hubname):
+        rng = random.Random(f"{hubname}|{int(time.time() // 900)}|{self.market['n']}|{random.random()}")
+        origin = self._hub_pt(hubname)
+        offers = []
+        for kind, n in (("local", 5), ("regional", 8), ("long", 5)):
+            for _ in range(n):
+                o = self._regular(rng, hubname, kind)
+                if o:
+                    offers.append(o)
+        if self.truck_caps():                                 # make sure a fresh board has plenty made for this truck
+            tries = 0
+            while sum(1 for o in offers if o.get("tailored")) < TAILORED_MIN and tries < 40:
+                tries += 1
+                o = self._regular(rng, hubname, tailored=True)
+                if o and not any(x["cargo"] == o["cargo"] and x["stops"][-1]["name"] == o["stops"][-1]["name"] for x in offers):
+                    offers.append(o)
         # themed scenarios
+        here = (origin["lat"], origin["lon"])
+        hubs = sorted((h for h in D.HUBS if h[0] != hubname), key=lambda h: dist_m(here, (h[1], h[2])))
+        by = lambda lo, hi: [h[0] for h in hubs if lo <= dist_m(here, (h[1], h[2])) / 1000 * 1.25 <= hi]
         for sc in D.SCENARIOS:
             o = self._scenario(rng, sc, hubname, origin, by)
             if o:
                 offers.append(o)
+        self.market["next_new"] = time.time() + rng.uniform(*NEW_EVERY_S)
         return offers
+
+    def _market_tick(self):
+        """The market is alive: jobs leave when their time is up and new random ones turn up every minute or so."""
+        m = self.market
+        if not m["hub"] or not m["offers"]:
+            return
+        now = time.time()
+        keep = [o for o in m["offers"] if not o.get("expires") or o["expires"] > now]
+        changed = len(keep) != len(m["offers"])
+        if now >= m["next_new"]:
+            rng = random.Random(f"{m['hub']}|{now}|{len(keep)}")
+            regular = [o for o in keep if o["kind"] != "scenario"]
+            for _ in range(1 if len(regular) >= MARKET_TARGET else 3):
+                o = self._regular(rng, m["hub"])
+                if o:
+                    keep.append(o)
+            m["next_new"] = now + rng.uniform(*NEW_EVERY_S)
+            changed = True
+        regular = [o for o in keep if o["kind"] != "scenario"]
+        if len(regular) > MARKET_MAX:                       # the oldest regular jobs go first
+            drop = {o["id"] for o in sorted(regular, key=lambda o: o["created"])[:len(regular) - MARKET_MAX]}
+            keep = [o for o in keep if o["id"] not in drop]
+            changed = True
+        if changed:
+            m["offers"] = keep
+            self.v += 1
 
     def _scenario(self, rng, sc, hubname, origin, by):
         cargo = D.CARGO_BY_ID[sc["cargo"]]
@@ -356,13 +436,13 @@ class Freight:
             o = origin if not cargo.get("local") else self._local_pt(rng, hubname, "depot")
         to = sc.get("to")
         stops = []
-        if cargo.get("local") or sc.get("stops") and not to:
-            n = rng.randint(*sc["stops"]) if sc.get("stops") else 1
-            stops = [self._local_pt(rng, hubname, rng.choice(["customer", "site", "yard"])) for _ in range(n)]
-        elif to:
+        if to:
             if sc.get("via"):
                 stops = [self._hub_pt(v) for v in self._along(frm, to, sc["via"], rng)]
             stops.append(self._hub_pt(to))
+        elif cargo.get("local") or sc.get("stops"):
+            n = rng.randint(*sc["stops"]) if sc.get("stops") else 1
+            stops = [self._local_pt(rng, hubname, rng.choice(["customer", "site", "yard"])) for _ in range(n)]
         else:
             lo, hi = sc.get("minkm", 30), sc.get("maxkm", 300)
             hubs = [h for h in by(lo, hi)]
@@ -814,6 +894,7 @@ class Freight:
 
     def view(self):
         """Small and cheap: part of every /api/state."""
+        self._market_tick()
         return {"state": self.state, "connected": self.connected(), "truck": self.truck, "job": self._job_view(),
                 "summary": self.summary, "tel": self.tel if self.connected() else {}, "v": self.v,
                 "hub": self.market["hub"], "balance": self.stats["balance"], "jobs": self.stats["jobs"],
@@ -821,16 +902,21 @@ class Freight:
 
     def board(self):
         """Everything for the board, the garage and the history (fetched when the version changes)."""
-        if not self.market["hub"] or time.time() - self.market["built"] > 900:
-            self.set_market(self.market["hub"])
+        self.set_market(self.market["hub"])
         offers = []
+        garage = self.garage()
         for o in self.market["offers"] + list(self.custom.values())[-6:]:
             ok, why = self.fits(o)
-            offers.append(o | {"fits": ok, "why": why})
+            alts = []
+            if not ok and garage:
+                cargo = D.CARGO_BY_ID[o["cargo"]]
+                alts = [g for g in garage if D.can_carry(set(g["caps"]), cargo)]
+            offers.append(o | {"fits": ok, "why": why, "alts": {"n": len(alts), "top": [
+                {"model": g["model"], "key": g["key"], "name": g["name"], "label": g["label"], "custom": g["custom"]} for g in alts[:3]]}})
         offers.sort(key=lambda o: (not o["fits"], {"scenario": 0, "custom": 0, "local": 1, "regional": 2, "long": 3}[o["kind"]], -o["pay"]))
         me = self._me()
         near = sorted(D.HUBS, key=lambda h: dist_m(me, (h[1], h[2])))[:1] if me else []
-        return {"v": self.v, "hub": self.market["hub"], "offers": offers, "garage": self.garage(), "truck": self.truck,
+        return {"v": self.v, "now": time.time(), "hub": self.market["hub"], "offers": offers, "garage": garage, "truck": self.truck,
                 "caps": sorted(self.truck_caps()), "stats": {k: v for k, v in self.stats.items() if k != "history"},
                 "history": self.stats["history"][:60], "towns": [{"name": h[0], "tags": h[3].split()} for h in D.HUBS],
                 "cargo": [{"id": c["id"], "name": c["name"], "icon": c["icon"], "needs": c["needs"],
