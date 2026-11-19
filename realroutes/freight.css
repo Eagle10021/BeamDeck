@@ -1,0 +1,132 @@
+/* ---------- Freight: job board, garage, planner, history, and the driving cockpit ---------- */
+#freight { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+#freight .fbar { display: flex; align-items: center; gap: 18px; padding: 10px 18px; padding-right: 350px; }
+#freight .fbar h1 { font-size: 26px; }
+#freight .ftabs { width: 460px; }
+#freight .fkpi b { display: block; font-size: 24px; } #freight .fkpi span { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+#freight .fchip { margin-left: auto; display: flex; align-items: center; gap: 10px; background: var(--panel2); border-radius: 14px; padding: 7px 14px; cursor: pointer; max-width: 300px; }
+#freight .fchip b { display: block; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#freight .fchip small { display: block; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#freight .fpage { display: none; min-height: 0; overflow: hidden; }
+#freight .fpage.on { display: flex; flex-direction: column; gap: 12px; }
+#freight .fscroll { overflow-y: auto; flex: 1; min-height: 0; padding-right: 4px; }
+.ftools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ftools select, .fform select, .fgarage input, .fform input { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 12px; padding: 9px 12px; font: inherit; font-size: 16px; }
+.fchips { display: flex; gap: 6px; flex-wrap: wrap; }
+.fchips button, .cap { background: var(--panel2); color: var(--muted); border-radius: 999px; padding: 7px 14px; font-size: 14px; font-weight: 600; }
+.fchips button.on, .cap.on { background: var(--md-primary); color: var(--md-on-primary); }
+.cap { font-size: 12px; padding: 3px 10px; cursor: default; }
+.cap.fit { background: var(--ok-container); color: var(--on-ok-container); }
+.cap.warn { background: var(--late-container); color: var(--on-late-container); }
+.cap.hot { background: var(--bad-container); color: var(--on-bad-container); }
+.fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
+.offer { background: var(--panel2); border-radius: 18px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; position: relative; }
+.offer.nofit { opacity: .62; }
+.offer.scen { background: color-mix(in srgb, var(--md-primary-container) 22%, var(--panel2)); }
+.offer .oh { display: flex; gap: 12px; align-items: center; }
+.offer .oi { font-size: 34px; width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; background: var(--panel); flex: none; }
+.offer .ot { font-weight: 800; font-size: 18px; line-height: 1.15; }
+.offer .os { color: var(--muted); font-size: 13px; }
+.offer .or { font-size: 15px; line-height: 1.3; }
+.offer .or i { color: var(--dim); font-style: normal; padding: 0 4px; }
+.offer .on { display: flex; gap: 14px; align-items: center; }
+.offer .on .pay { font-size: 26px; font-weight: 800; color: var(--ok); margin-right: auto; }
+.offer .on span { color: var(--muted); font-size: 14px; }
+.offer .tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.offer button.take { background: var(--ok); color: var(--on-ok); font-weight: 800; font-size: 16px; padding: 10px 20px; border-radius: 14px; }
+.offer button.take:disabled { background: color-mix(in srgb, var(--md-on-surface) 12%, transparent); color: color-mix(in srgb, var(--md-on-surface) 40%, transparent); font-weight: 600; font-size: 13px; }
+.fgarage { display: grid; grid-template-columns: 1.3fr 1fr; gap: 12px; flex: 1; min-height: 0; }
+.fgarage > .card { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.gmodel { margin-bottom: 10px; }
+.gmodel h3 { display: flex; align-items: center; gap: 8px; font-size: 17px; margin-bottom: 6px; }
+.gmodel h3 small { color: var(--muted); font-weight: 400; }
+.gmodel h3 .star { margin-left: auto; background: none; font-size: 22px; color: var(--dim); }
+.gmodel h3 .star.on { color: #ffd166; }
+.gcfg { width: 100%; text-align: left; background: var(--panel2); border-radius: 12px; padding: 9px 12px; margin-bottom: 5px; display: flex; flex-direction: column; gap: 4px; }
+.gcfg.sel { outline: 2px solid var(--accent); }
+.gcfg b { font-size: 15px; } .gcfg .caps { display: flex; gap: 5px; flex-wrap: wrap; }
+.spec { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 15px; }
+.spec dt { color: var(--muted); } .spec dd { margin: 0; font-weight: 600; }
+.fform { display: flex; flex-direction: column; gap: 12px; max-width: 760px; }
+.fform .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; } .fform label { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .06em; display: block; margin-bottom: 4px; }
+.hist { width: 100%; border-collapse: collapse; font-size: 15px; } .hist th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; padding: 6px 10px; }
+.hist td { padding: 9px 10px; border-top: 1px solid var(--line); } .hist td.n { text-align: right; font-variant-numeric: tabular-nums; }
+.fstats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.empty { color: var(--muted); text-align: center; padding: 50px 20px; font-size: 17px; }
+
+/* ----- the cockpit ----- */
+#fDrive { display: none; grid-template-columns: 1.1fr 1fr; grid-template-rows: auto auto 1fr; gap: 10px; min-height: 0; }
+#freight.driving #fDrive { display: grid; }
+#freight.driving .fpage, #freight.driving .ftabs, #freight.driving .fchip { display: none !important; }
+#fDrive .mapbox { grid-row: 1 / 4; position: relative; overflow: hidden; padding: 0; border-radius: 18px; }
+#fDrive .jobstrip { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; }
+.jobstrip .jt { display: flex; align-items: center; gap: 10px; }
+.jobstrip .jt .ji { font-size: 28px; } .jobstrip .jt b { font-size: 19px; display: block; } .jobstrip .jt small { color: var(--muted); font-size: 13px; }
+.jobstrip .jt .jcancel { margin-left: auto; background: var(--panel2); color: var(--bad); padding: 9px 16px; border-radius: 12px; font-weight: 700; font-size: 14px; }
+.jobstrip .jdrops { display: flex; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+.jobstrip .jdrops span { background: var(--panel2); color: var(--muted); padding: 3px 10px; border-radius: 999px; }
+.jobstrip .jdrops span.done { background: var(--ok-container); color: var(--on-ok-container); }
+.jobstrip .jdrops span.now { background: var(--md-primary); color: var(--md-on-primary); font-weight: 700; }
+.jobstrip .jnums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.jobstrip .jnums div { background: var(--panel2); border-radius: 12px; padding: 7px 11px; }
+.jobstrip .jnums b { display: block; font-size: 21px; } .jobstrip .jnums span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.jobstrip .late { color: var(--late); } .jobstrip .bad { color: var(--bad); }
+.jobstrip .jstage { color: var(--muted); font-size: 15px; padding: 6px 0; }
+#fDrive .cockpit { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+#fDrive .cockpit > *, #fControls > * { flex: none; }
+.gauges { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.g { background: var(--panel2); border-radius: 12px; padding: 5px 10px 7px; position: relative; overflow: hidden; }
+.g b { display: block; font-size: 19px; line-height: 1.15; white-space: nowrap; } .g span { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.g i { position: absolute; left: 0; bottom: 0; height: 4px; width: 0; background: var(--md-primary); transition: width .4s; }
+.g.warn b { color: var(--late); } .g.hot b { color: var(--bad); } .g.hot { outline: 1px solid var(--bad); }
+.g.wide { grid-column: span 2; } .g.speed b { font-size: 27px; }
+.g small { font-size: 11px; color: var(--muted); font-weight: 400; }
+.panel { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+.panel h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
+.cgroup { display: flex; flex-wrap: wrap; gap: 8px; }
+.cb { background: var(--panel2); color: var(--text); border-radius: 16px; padding: 8px 12px; font-weight: 700; font-size: 14px; min-width: 84px; text-align: center; touch-action: manipulation; line-height: 1.15; }
+.cb small { display: block; font-weight: 500; font-size: 12px; color: var(--muted); margin-top: 1px; }
+.cb.on { background: var(--md-primary); color: var(--md-on-primary); } .cb.on small { color: color-mix(in srgb, var(--md-on-primary) 75%, transparent); }
+.cb.danger { color: var(--bad); }
+.cb:active { scale: .94; }
+.cstep { display: flex; align-items: stretch; background: var(--panel2); border-radius: 16px; overflow: hidden; }
+.cstep button { background: none; padding: 0 16px; font-size: 22px; font-weight: 700; color: var(--text); }
+.cstep button:active { background: color-mix(in srgb, var(--md-primary) 30%, transparent); }
+.cstep .cv { padding: 6px 10px; text-align: center; min-width: 96px; font-weight: 700; font-size: 14px; line-height: 1.15; }
+.cstep .cv small { display: block; font-weight: 500; font-size: 12px; color: var(--muted); }
+.cstep.on .cv { color: var(--md-primary); }
+.cseg { display: flex; background: var(--panel2); border-radius: 16px; padding: 3px; gap: 3px; }
+.cseg button { background: none; color: var(--muted); padding: 8px 14px; border-radius: 13px; font-weight: 700; font-size: 14px; }
+.cseg button.on { background: var(--md-primary); color: var(--md-on-primary); }
+.ctrlhide { display: none !important; }
+
+/* PTO: a tap switches the engine speed high / low, a long press opens the RPM slider */
+.ptowrap { position: relative; }
+.cb.pto { min-width: 150px; user-select: none; -webkit-user-select: none; touch-action: none; }
+.cb.pto.holding { scale: 1.04; }
+.ptopop { position: fixed; z-index: 90; width: 430px; max-width: calc(100vw - 20px); background: var(--md-surface-container-highest); border: 1px solid var(--md-outline-variant); border-radius: 28px; padding: 16px 20px 18px; box-shadow: 0 14px 44px rgba(0,0,0,.55); display: none; transform-origin: var(--ax, 40px) 100%; touch-action: none; }
+.ptopop.on { display: block; animation: m3-pop var(--d-spatial) var(--m3-bouncy) backwards, m3-fade var(--d-effects) var(--m3-effects) backwards; }
+.ptopop::after { content: ""; position: absolute; bottom: -9px; left: var(--ax, 34px); width: 18px; height: 18px; background: inherit; border-right: 1px solid var(--md-outline-variant); border-bottom: 1px solid var(--md-outline-variant); transform: rotate(45deg); }
+.ptopop.below { transform-origin: var(--ax, 40px) 0; }
+.ptopop.below::after { bottom: auto; top: -9px; transform: rotate(225deg); }
+.ptopop .ph { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; }
+.ptopop .ph b { font-size: 40px; font-weight: 800; letter-spacing: -.02em; } .ptopop .ph b small { font-size: 16px; font-weight: 600; color: var(--muted); margin-left: 4px; }
+.ptopop .ph span { color: var(--muted); font-size: 13px; text-align: right; line-height: 1.3; }
+.ptotrack { position: relative; height: 56px; border-radius: 28px; background: var(--md-secondary-container); cursor: pointer; touch-action: none; margin: 8px 0 10px; overflow: hidden; }
+.ptotrack .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--md-primary); border-radius: 28px 6px 6px 28px; }
+.ptotrack .live { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--md-tertiary); border-radius: 2px; box-shadow: 0 0 10px var(--md-tertiary); left: 0; opacity: .0; transition: left .25s; }
+.ptotrack .knob { position: absolute; top: 50%; width: 6px; height: 40px; margin-left: -3px; margin-top: -20px; border-radius: 3px; background: var(--md-on-primary); pointer-events: none; }
+.ptotrack.drag .knob { height: 48px; margin-top: -24px; width: 8px; margin-left: -4px; }
+.ptopop .pre { display: flex; gap: 6px; flex-wrap: wrap; }
+.ptopop .pre button { background: var(--md-secondary-container); color: var(--md-on-secondary-container); padding: 7px 14px; border-radius: 999px; font-size: 14px; font-weight: 700; }
+.ptopop .pre button.off { background: none; border: 1px solid var(--md-outline); margin-left: auto; }
+.ptopop .pre button.on { background: var(--md-primary); color: var(--md-on-primary); }
+
+/* summary of a job */
+#fSummary .big { font-size: 56px; font-weight: 800; color: var(--ok); margin: 4px 0 2px; }
+#fSummary .rows { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 16px 0; text-align: left; }
+#fSummary .rows div { background: var(--panel2); border-radius: 12px; padding: 8px 12px; } #fSummary .rows b { display: block; font-size: 22px; } #fSummary .rows span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+#fSummary .stars { font-size: 28px; letter-spacing: 4px; color: #ffd166; }
+body.fdriving .modes { display: none; }
+#freight.driving { grid-template-rows: 1fr; }
+#freight.driving .fbar { display: none; }

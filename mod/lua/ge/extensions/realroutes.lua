@@ -334,13 +334,289 @@ end
 -- ---- vehicle state: asked from the vehicle's own Lua, answered through onVeh ----
 local QUERY = [[
 local c = controller.getController("bus")
+rrTick = (rrTick or 0) + 1
+local ev = electrics.values
+local function has(n) return controller.getController(n) ~= nil end
+local function mode(n)
+  local k = controller.getController(n)
+  if k and k.getCurrentDriveModeKey then
+    local ok, r = pcall(k.getCurrentDriveModeKey)
+    if ok then return r end
+  end
+end
+if rrTick % 20 == 1 then   -- the weight of the whole vehicle: every two seconds is plenty
+  local ok, st = pcall(function() return obj:calcBeamStats() end)
+  if ok and st then rrMass = st.total_weight end
+end
 obj:queueGameEngineLua("if realroutes then realroutes.onVeh(" .. serialize({
-  d = electrics.values.dooropen or 0, k = electrics.values.kneel or 0,
+  d = ev.dooropen or 0, k = ev.kneel or 0,
   gx = sensors.gx2 or sensors.gx or 0, gy = sensors.gy2 or sensors.gy or 0, bus = c ~= nil,
-  l = electrics.values.lights_state or electrics.values.lowbeam or 0}) .. ") end")
+  l = ev.lights_state or ev.lowbeam or 0,
+  rpm = ev.rpm, gear = ev.gear, fuel = ev.fuel, fuelL = ev.fuelVolume, fuelCap = ev.fuelCapacity,
+  wT = ev.watertemp, oT = ev.oiltemp, odo = ev.odometer, trip = ev.trip, pb = ev.parkingbrake,
+  load = ev.engineLoad, eng = ev.engineRunning, boost = ev.turboBoost, chk = ev.checkengine, lowf = ev.lowfuel,
+  dmg = beamstate.damage, mass = rrMass,
+  ret = ev.retarder_levelIndex, retS = ev.retarder_setting, retOn = ev.retarder_isEnabled,
+  cb = ev.mainEngine_compressionBrake_levelIndex, cbOn = ev.mainEngine_compressionBrake_isEnabled,
+  cc = ev.cruiseControlActive, ccT = ev.cruiseControlTarget, mix = ev.mixer_on,
+  ptoRpm = rrTruck and rrTruck.getRPM() or nil, raised = ev.raisedIdle,
+  has = {ret = has("retarderControl"), cb = has("compressionBrake"), la = has("liftAxleControl"),
+         dr = has("rearLockControl"), df = has("frontLockControl"), di = has("interaxleLockControl"),
+         tc = has("transfercaseControl"), fw = has("fifthwheel"), mix = ev.mixer_on ~= nil,
+         pto = ev.hydraulicPTOControl ~= nil},
+  dm = {r = mode("rearLockControl"), f = mode("frontLockControl"), i = mode("interaxleLockControl"),
+        t = mode("transfercaseControl")}}) .. ") end")
 ]]
 
 M.onVeh = function(t) veh = t end
+
+-- =====================================================================================================
+-- Freight: the truck garage, the truck and trailer for a job, and the truck control panel's commands.
+-- =====================================================================================================
+
+-- how many vehicles are hooked to the player's (trailers; the game keeps this table on every couple / uncouple)
+local function trailerCount()
+  local v = player()
+  local cv = rawget(_G, "core_vehicles")
+  local adj = v and cv and cv.vehsCouplings and cv.vehsCouplings[v:getID()]
+  if not adj then return 0 end
+  local n = 0
+  for _ in pairs(adj) do n = n + 1 end
+  return n
+end
+
+-- every truck the game has (stock and mods) with its configs and the specs the game shows; one message a model
+local TRUCK_TYPES = {Truck = true, ["Heavy Machinery"] = true}
+local function specsOf(c)
+  local y = c.Years
+  return {power = c.Power, torque = c.Torque, weight = c.Weight, top = c["Top Speed"], drive = c.Drivetrain,
+          trans = c.Transmission, body = c["Body Style"], fuel = c["Fuel Type"],
+          years = type(y) == "table" and y.min and (tostring(y.min) .. "-" .. tostring(y.max or "")) or nil}
+end
+local function listVehicles()
+  local ok, list = pcall(function() return core_vehicles.getModelList(true).models end)
+  local trucks = {}
+  if ok and type(list) == "table" then
+    for _, m in ipairs(list) do
+      if TRUCK_TYPES[m.Type] then trucks[#trucks + 1] = m end
+    end
+  end
+  if #trucks == 0 then send({type = "vehicles", first = true, last = true}); return end
+  for i, m in ipairs(trucks) do
+    local okm, full = pcall(core_vehicles.getModel, m.key)
+    local configs = {}
+    if okm and type(full) == "table" and type(full.configs) == "table" then
+      for key, c in pairs(full.configs) do
+        configs[#configs + 1] = {key = key, name = c.Configuration or c.Name or key, specs = specsOf(c)}
+      end
+      table.sort(configs, function(a, b) return a.key < b.key end)
+      while #configs > 110 do table.remove(configs) end     -- one datagram per model
+    end
+    send({type = "vehicles", first = i == 1, last = i == #trucks,
+          model = {model = m.key, brand = m.Brand, name = m.Name, type = m.Type, configs = configs}})
+  end
+end
+
+-- ---- the rig: the job's truck, teleported to the pickup, with a trailer that fits its hitch ----
+local rig = nil                -- {id, stage, truck, dest, trailers, tIdx, truckId, trailerId, ...}
+local rigTrailers = {}         -- ids of the trailers this extension spawned (removed with the job)
+local rigTeleported = false
+local PREFER = {tractor = {"fifthwheel_v2", "fifthwheel", "gooseneck_hitch"}, drawbar = {"pintle"},
+                light = {"tow_hitch", "gooseneck_hitch", "pintle"}}
+
+local function rigSay(text)
+  if rig then send({type = "freight", id = rig.id, event = "stage", text = text}) end
+end
+local function rigClearTrailers()
+  for id in pairs(rigTrailers) do
+    local o = getObjectByID(id)
+    if o then pcall(function() o:delete() end) end
+    rigTrailers[id] = nil
+  end
+end
+local function rigFail(why)
+  if rig then send({type = "freight", id = rig.id, event = "fail", why = why}) end
+  rigClearTrailers()
+  rig = nil
+end
+local function couplerCache(id)
+  local cv = rawget(_G, "core_vehicles")
+  return cv and cv.vehsCouplerCache and cv.vehsCouplerCache[id] or {}
+end
+
+-- A coupler pair that fits: an active coupler (couplerTag) on one vehicle and a receiver (tag) of the same name on the
+-- other: the truck's fifth wheel and a semi trailer's kingpin, the truck's pintle (eye hitch) and a drawbar's eye.
+local function findPair(truckId, trailerId, prefer)
+  local best
+  local function try(aId, bId, aIsTruck)
+    for acid, an in pairs(couplerCache(aId)) do
+      if an.couplerTag and not an.couplerWeld and not an.couplerLock then
+        for bcid, bn in pairs(couplerCache(bId)) do
+          if bn.tag == an.couplerTag and not bn.couplerWeld then
+            local score = 0
+            for i, t in ipairs(prefer) do if t == an.couplerTag then score = 10 - i end end
+            if not best or score > best.score then
+              best = {tag = an.couplerTag, truckNode = aIsTruck and acid or bcid,
+                      trailerNode = aIsTruck and bcid or acid, score = score}
+            end
+          end
+        end
+      end
+    end
+  end
+  try(truckId, trailerId, true)
+  try(trailerId, truckId, false)
+  return best
+end
+
+local function rigCoupled()
+  local cv = rawget(_G, "core_vehicles")
+  local adj = cv and rig and rig.truckId and cv.vehsCouplings and cv.vehsCouplings[rig.truckId]
+  return adj ~= nil and rig.trailerId ~= nil and adj[rig.trailerId] == true
+end
+
+-- put the trailer's hitch on the truck's and switch the couplers to latch
+local function rigCouple()
+  local cv = core_vehicles
+  local t, tr = rig.truckId, rig.trailerId
+  local pair = findPair(t, tr, rig.prefer)
+  if not pair then return false end
+  rig.pair = pair
+  local offT = cv.vehsCouplerOffset[t] and cv.vehsCouplerOffset[t][pair.truckNode]
+  local offR = cv.vehsCouplerOffset[tr] and cv.vehsCouplerOffset[tr][pair.trailerNode]
+  if offT and offR then
+    local ok, err = pcall(spawn.placeTrailer, t, offT, tr, offR, pair.tag)
+    if not ok then log("W", "realroutes", "placeTrailer: " .. tostring(err)) end
+  end
+  for _, id in ipairs({t, tr}) do
+    local o = getObjectByID(id)
+    if o then o:queueLuaCommand("beamstate.activateAutoCoupling()") end
+  end
+  return true
+end
+
+local function rigDone(coupled)
+  rig.stage = "done"
+  local c = rig.cand
+  send({type = "freight", id = rig.id, event = "ready", coupled = coupled and true or false,
+        trailer = c and c.config or nil, trailerName = c and (c.model .. " " .. c.config) or nil,
+        hitch = rig.pair and rig.pair.tag or nil})
+end
+
+local function rigUpdate()
+  if not rig or rig.stage == "done" then return end
+  local now = os.clockhp()
+  if now - rig.t0 > 110 then rigFail("Setting up the truck took too long."); return end
+  local a = api()
+  if rig.stage == "wait_truck" then
+    local v = player()
+    if v and now >= rig.next and v:getJBeamFilename() == rig.truck.model then
+      rig.truckId = v:getID()
+      rig.stage = "teleport"
+    end
+  elseif rig.stage == "teleport" then
+    if not (a and a ~= flat and a.teleport) then rigFail("Freight needs BeamNG.Earth's world loaded."); return end
+    rigTeleported = false
+    local ok, why = a.teleport(rig.dest.lat, rig.dest.lon, rig.dest.name)
+    if ok == false then rigFail("Could not move to the pickup: " .. tostring(why)); return end
+    rigSay("Moving to the pickup (the world has to load)…")
+    rig.stage, rig.next = "wait_teleport", now
+  elseif rig.stage == "wait_teleport" then
+    if rigTeleported and a and a.ready and a.ready() then rig.stage, rig.next = "settle", now + 1.5
+    elseif now - rig.next > 75 then rig.stage, rig.next = "settle", now end      -- gave up waiting: carry on
+  elseif rig.stage == "settle" then
+    if now >= rig.next then
+      if #rig.trailers > 0 then rig.stage = "trailer"; rig.tIdx = 1 else rigDone(nil) end
+    end
+  elseif rig.stage == "trailer" then
+    local cand = rig.trailers[rig.tIdx]
+    if not cand then rigFail("No trailer fits this truck's hitch. Pick another truck or another job."); return end
+    local truck = getObjectByID(rig.truckId)
+    if not truck then rigFail("The truck disappeared."); return end
+    rigSay("Fitting a trailer: " .. cand.model .. " " .. cand.config)
+    local pos = vec3(truck:getPosition())
+    local dir = vec3(truck:getDirectionVector()); dir:normalize()
+    local path = "vehicles/" .. cand.model .. "/" .. cand.config .. ".pc"
+    local ok, tv = pcall(core_vehicles.spawnNewVehicle, cand.model,
+      {config = path, pos = pos - dir * 14 + vec3(0, 0, 1.5), rot = quatFromDir(dir, vec3(0, 0, 1)),
+       autoEnterVehicle = false, canSpawnAnotherVehicleCheck = false})
+    if not ok or not tv then
+      log("W", "realroutes", "trailer " .. path .. ": " .. tostring(tv))
+      rig.tIdx = rig.tIdx + 1
+      return
+    end
+    rig.trailerId, rig.cand = tv:getID(), cand
+    rigTrailers[rig.trailerId] = true
+    local pv = player()                         -- the truck stays the vehicle being driven
+    if pv and pv:getID() ~= rig.truckId then be:enterVehicle(0, truck) end
+    rig.stage, rig.next = "wait_trailer", now + 0.8
+  elseif rig.stage == "wait_trailer" and now >= rig.next then
+    if not getObjectByID(rig.trailerId) then rig.tIdx = rig.tIdx + 1; rig.stage = "trailer"; return end
+    if not rigCouple() then                     -- this trailer has no hitch the truck takes: the next one
+      local o = getObjectByID(rig.trailerId)
+      if o then pcall(function() o:delete() end) end
+      rigTrailers[rig.trailerId], rig.trailerId, rig.cand = nil, nil, nil
+      rig.tIdx = rig.tIdx + 1
+      rig.stage = "trailer"
+      return
+    end
+    rig.stage, rig.next, rig.tries = "verify", now + 1.5, 0
+  elseif rig.stage == "verify" then
+    if rigCoupled() then rigDone(true)
+    elseif now >= rig.next then
+      rig.tries = rig.tries + 1
+      if rig.tries >= 4 then rigDone(false)     -- not latched: the driver hooks it up
+      else rigCouple(); rig.next = now + 2.5 end
+    end
+  end
+end
+
+local function rigStart(c)
+  if rig and rig.id == c.id and rig.stage ~= "done" then return end    -- a repeated command
+  rigClearTrailers()
+  rig = {id = c.id, truck = c.truck, dest = c.at, trailers = c.trailers or {}, prefer = PREFER[c.needs] or {},
+         stage = "wait_truck", t0 = os.clockhp(), next = os.clockhp() + 1.2}
+  rigSay("Spawning the truck…")
+  core_vehicles.replaceVehicle(c.truck.model, {config = "vehicles/" .. c.truck.model .. "/" .. c.truck.config .. ".pc"})
+end
+
+-- ---- the truck control panel: a fixed list of the game's own vehicle actions (nothing from the network runs as code) ----
+local TRUCK_CMDS = {
+  retarder_up = "controller.getControllerSafe('retarderControl').changeRetarderSettingIndex(1)",
+  retarder_down = "controller.getControllerSafe('retarderControl').changeRetarderSettingIndex(-1)",
+  retarder_off = "controller.getControllerSafe('retarderControl').setRetarderMode('off')",
+  retarder_auto = "controller.getControllerSafe('retarderControl').setRetarderMode('auto')",
+  jake_toggle = "controller.getControllerSafe('compressionBrake').toggleCompressionBrakeState()",
+  jake_up = "controller.getControllerSafe('compressionBrake').changeCompressionBrakeLevel(1)",
+  jake_down = "controller.getControllerSafe('compressionBrake').changeCompressionBrakeLevel(-1)",
+  park_on = "input.event('parkingbrake', 1, 1)",
+  park_off = "input.event('parkingbrake', 0, 1)",
+  lift_axle = "controller.getControllerSafe('liftAxleControl').toggleMode()",
+  diff_rear_lock = "controller.getControllerSafe('rearLockControl').setDriveMode('locked')",
+  diff_rear_unlock = "controller.getControllerSafe('rearLockControl').setDriveMode('unlocked')",
+  diff_front_lock = "controller.getControllerSafe('frontLockControl').setDriveMode('locked')",
+  diff_front_unlock = "controller.getControllerSafe('frontLockControl').setDriveMode('unlocked')",
+  diff_inter_lock = "controller.getControllerSafe('interaxleLockControl').setDriveMode('locked')",
+  diff_inter_unlock = "controller.getControllerSafe('interaxleLockControl').setDriveMode('unlocked')",
+  tc_2hi = "controller.getControllerSafe('transfercaseControl').setDriveMode('2hi')",
+  tc_4hi = "controller.getControllerSafe('transfercaseControl').setDriveMode('4hi')",
+  tc_4lo = "controller.getControllerSafe('transfercaseControl').setDriveMode('4lo')",
+  fifth_release = "controller.getControllerSafe('fifthwheel').detachFifthwheel() beamstate.detachCouplers('fifthwheel_v2')",
+  pintle_release = "beamstate.detachCouplers('pintle')",
+  trailer_air = "energyStorage.getStorageSafe('mainAirTank'):toggleConsumerPressureCoef()",
+  cruise_on = "extensions.use('cruiseControl').holdCurrentSpeed()",
+  cruise_off = "extensions.use('cruiseControl').setEnabled(false)",
+  cruise_up = "extensions.use('cruiseControl').changeSpeed(1.389)",
+  cruise_down = "extensions.use('cruiseControl').changeSpeed(-1.389)",
+  bed_up = "electrics.values.hydraulicPTOControl = 1",
+  bed_stop = "electrics.values.hydraulicPTOControl = 0",
+  bed_down = "electrics.values.hydraulicPTOControl = -1",
+  mixer_on = "electrics.values.mixer_on = 1",
+  mixer_off = "electrics.values.mixer_on = 0",
+  mixer_faster = "if electrics.values.mixer_speed < 0.89 then electrics.values.mixer_speed = electrics.values.mixer_speed + 0.2 end",
+  mixer_slower = "if electrics.values.mixer_speed > 0.31 then electrics.values.mixer_speed = electrics.values.mixer_speed - 0.2 end",
+  mixer_dir = "if (electrics.values.mixer_lock or 0) < 0.01 then electrics.values.mixer_dir = (electrics.values.mixer_dir == -1 and 1 or -1) end",
+}
 
 -- ---- placing the bus at the first stop ----
 local function placeBus(g)
@@ -880,6 +1156,21 @@ handlers.doors = function() vehLua('local c = controller.getController("bus") if
 handlers.kneel = function() vehLua('local c = controller.getController("bus") if c then c.toggleKneel() end') end
 handlers.hazards = function() vehLua("electrics.toggle_warn_signal()") end
 handlers.notify = function(c) message(c.text, c.secs) end
+handlers.vehicles = function() listVehicles() end
+handlers.freightSpawn = function(c) rigStart(c) end
+handlers.freightClear = function() rigClearTrailers(); rig = nil end
+handlers.freightRecouple = function()
+  if rig and rig.truckId and rig.trailerId then rigCouple(); rig.stage, rig.next, rig.tries = "verify", os.clockhp() + 1.5, 0 end
+end
+handlers.pto = function(c)
+  local rpm = tonumber(c.rpm)
+  local arg = (rpm and rpm > 0) and string.format("%d", math.floor(math.max(700, math.min(2400, rpm)))) or "nil"
+  vehLua('if not rrTruck then extensions.load("rrTruck") end rrTruck.setPtoRPM(' .. arg .. ')')
+end
+handlers.truck = function(c)
+  local cmd = TRUCK_CMDS[c.name]
+  if cmd then vehLua(cmd) end
+end
 handlers.standee = function(c)
   if not c.show then setStandees({}); return end
   setStandees(c.people or {{avatar = c.avatar, lat = c.lat, lon = c.lon}})
@@ -956,6 +1247,7 @@ end
 -- ---- every frame ----
 local function onUpdate(dtReal)
   receive()
+  rigUpdate()
   local a = api()
   if pendingGoto and os.clockhp() >= pendingGoto.at then
     local g = pendingGoto
@@ -1008,11 +1300,18 @@ local function onUpdate(dtReal)
         place = a.place and a.place() or nil, gpsName = g and g.name or nil,
         doors = (veh.d or 0) > 0.5, kneel = (veh.k or 0) > 0.5, gx = veh.gx, gy = veh.gy, bus = veh.bus,
         ready = true, limit = lim and lim.ms or nil, earth = a.earthVersion and a.earthVersion() or nil,
-        flat = (a == flat) or nil, lights = (veh.l or 0) > 0})
+        flat = (a == flat) or nil, lights = (veh.l or 0) > 0,
+        -- the truck: gauges, trailer count and the state of its controls (the freight panel)
+        rpm = veh.rpm, gear = veh.gear, fuel = veh.fuel, fuelL = veh.fuelL, fuelCap = veh.fuelCap, wT = veh.wT, oT = veh.oT,
+        odo = veh.odo, trip = veh.trip, pb = veh.pb, load = veh.load, eng = veh.eng, boost = veh.boost, chk = veh.chk,
+        lowf = veh.lowf, dmg = veh.dmg, mass = veh.mass, tr = trailerCount(),
+        ret = veh.ret, retS = veh.retS, retOn = veh.retOn, cb = veh.cb, cbOn = veh.cbOn, cc = veh.cc, ccT = veh.ccT,
+        mix = veh.mix, has = veh.has, dm = veh.dm, ptoRpm = veh.ptoRpm, raised = veh.raised})
 end
 
 -- ---- BeamNG.Earth hooks ----
 M.onBeamNGEarthTeleported = function()
+  rigTeleported = true
   if pendingGoto and pendingGoto.stage == "wait" then
     local g = pendingGoto
     pendingGoto = nil

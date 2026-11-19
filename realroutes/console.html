@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="maplibre/maplibre-gl.css">
 <script src="maplibre/maplibre-gl.js"></script>
 <script src="m3color.js"></script>
+<link rel="stylesheet" href="freight.css">
 <link rel="icon" href="icon.svg">
 <meta name="theme-color" content="#0c0e17">
 <meta name="mobile-web-app-capable" content="yes">
@@ -217,7 +218,7 @@
   .pick-av img { width: 76px; height: 76px; border-radius: 50%; object-fit: cover; border: 3px solid transparent; cursor: pointer; }
   .pick-av img.sel { border-color: var(--accent); }
   .stopsHead .toggle { width: 220px; }
-  #rides .bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 22px; padding: 12px 18px; padding-right: 220px; }
+  #rides .bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 22px; padding: 12px 18px; padding-right: 340px; }
   #rides .bar h1 { font-size: 26px; }
   .kpi b { display: block; font-size: 26px; } .kpi span { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
   .online { margin-left: auto; padding: 12px 22px; border-radius: 14px; font-weight: 800; font-size: 18px; background: var(--ok); color: var(--on-ok); }
@@ -384,7 +385,7 @@
   <button class="go" id="rsDone" style="width:100%">Done</button>
 </div></div>
 
-<div class="modes" id="modes"><button data-m="bus" class="on">🚌 Bus</button><button data-m="rides">🚗 Rides</button></div>
+<div class="modes" id="modes"><button data-m="bus" class="on">🚌 Bus</button><button data-m="rides">🚗 Rides</button><button data-m="freight">🚚 Freight</button></div>
 
 <!-- ============ RIDES ============ -->
 <section class="view" id="rides">
@@ -404,6 +405,36 @@
   <div class="card rpage" id="rPeople" style="display:none"></div>
   <input type="file" id="picFile" accept="image/*" style="display:none">
 </section>
+
+<!-- ============ FREIGHT ============ -->
+<section class="view" id="freight">
+  <div class="card fbar">
+    <h1>Freight</h1>
+    <div class="toggle ftabs" id="fTabs"><button data-v="jobs" class="on">Jobs</button><button data-v="garage">Garage</button><button data-v="plan">Plan</button><button data-v="history">History</button></div>
+    <div class="fkpi"><b id="fBal">$0</b><span>Balance</span></div>
+    <div class="fkpi"><b id="fJobs">0</b><span>Jobs</span></div>
+    <div class="fchip" id="fTruckChip"><div><b id="fTruckName">No truck</b><small id="fTruckSub">Pick one in the Garage</small></div></div>
+  </div>
+  <div class="fpage on" id="fpJobs">
+    <div class="ftools"><span class="muted">Market</span><select id="fHub"></select>
+      <div class="fchips" id="fFilters"><button data-f="fits">Fits my truck</button><button data-f="all">All</button><button data-f="local">Local</button><button data-f="regional">Regional</button><button data-f="long">Long haul</button><button data-f="scenario">Scenarios</button></div>
+      <button class="cap" id="fRefresh" style="cursor:pointer;padding:8px 14px;font-size:14px">↻ New jobs</button><span class="muted" id="fJobsCount"></span></div>
+    <div class="fscroll"><div class="fgrid" id="fJobsList"></div></div>
+  </div>
+  <div class="fpage" id="fpGarage">
+    <div class="ftools"><input id="fSearch" placeholder="Search trucks…" autocomplete="off" style="width:280px"><button class="cap" id="fTruckRefresh" style="cursor:pointer;padding:8px 14px;font-size:14px">↻ Refresh from the game</button></div>
+    <div class="fgarage"><div class="card"><div class="fscroll" id="fGarageList"></div></div><div class="card" id="fGarageSel" style="overflow-y:auto"></div></div>
+  </div>
+  <div class="fpage" id="fpPlan"><div class="card fscroll"><div class="fform" id="fPlanForm"></div></div></div>
+  <div class="fpage" id="fpHistory"><div class="fstats" id="fStats"></div><div class="card fscroll"><div id="fHistory"></div></div></div>
+  <div id="fDrive">
+    <div class="card mapbox"><div id="fMap" style="height:100%"></div><button class="recenter" id="fRecenter">◎ Follow</button></div>
+    <div class="card jobstrip" id="fStrip"></div>
+    <div class="gauges" id="fGauges"></div>
+    <div class="cockpit"><div id="fControls" style="display:contents"></div></div>
+  </div>
+</section>
+<div class="summary" id="fSummary"><div class="card"></div></div>
 
 <!-- ============ PICK A ROUTE ============ -->
 <section class="view on" id="pick">
@@ -946,7 +977,7 @@ async function updateRoute(v) {
     if (String(r.version) !== String(v)) return;
     routeVer = v;
     routeShown = (r.points || []).length > 1;
-    [rMap, bMap].forEach(mp => mp && mp.route(r.points));
+    [rMap, bMap, window.fMap].forEach(mp => mp && mp.route(r.points));
   } catch {} finally { routeBusy = false; }
 }
 $("busView").onclick = e => {
@@ -965,6 +996,7 @@ function setMode(m, share = true) {
   if (share && prefs && prefs.mode !== m) setPrefs({mode: m});        // the other screens follow
   document.querySelectorAll("#modes button").forEach(b => b.classList.toggle("on", b.dataset.m === m));
   if (m === "rides") { show("rides"); setTimeout(() => rMap && rMap.resize(), 50); }
+  else if (m === "freight") { show("freight"); if (window.fOnShow) fOnShow(); }
   else show(lastShift && lastShift.state !== "done" ? "drive" : "pick");
 }
 $("modes").onclick = e => { const b = e.target.closest("button"); if (b) setMode(b.dataset.m); };
@@ -1262,6 +1294,7 @@ async function tick() {
     document.body.classList.toggle("driving", !!(st.shift && st.shift.state !== "done") && mode === "bus");
     render(st);
     renderRides(st.rides, st.game);
+    if (window.renderFreight) renderFreight(st);
     const g = st.game; lastGame = g;
     if (g.connected && !!g.flat !== mapFlat) {          // switched between BeamNG.Earth and a regular map
       mapFlat = !!g.flat; placedReset(); allMaps.forEach(x => x.applyStyle());
@@ -1518,7 +1551,7 @@ setInterval(tick, 500); tick();
 let poseBusy = false;
 async function poseTick() {
   if (poseBusy) return;
-  const visible = [rMap, bMap].filter(mp => mp && mp.map.getContainer().offsetParent);
+  const visible = [rMap, bMap, window.fMap].filter(mp => mp && mp.map.getContainer().offsetParent);
   if (!visible.length) return;
   poseBusy = true;
   try {
@@ -1567,5 +1600,6 @@ document.addEventListener("click", keepAwake, {once: true});
 keepAwake();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 </script>
+<script src="freight.js"></script>
 </body>
 </html>

@@ -519,7 +519,7 @@ class Helper:
         import sys
         if HERE not in sys.path:
             sys.path.insert(0, HERE)
-        import rides, people, nav
+        import rides, people, nav, freight
         self.people = people
         self.nav = nav.Nav()                                # turn-by-turn on the planned GPS route, for every client
         self._nav_t = 0
@@ -538,6 +538,7 @@ class Helper:
         self.aa_seen = 0
         os.makedirs(data_root, exist_ok=True)
         self.rides = rides.Rides(self.send, data_root, announce=self.announce)
+        self.freight = freight.Freight(self.send, data_root, announce=self.announce)   # trucking jobs, the garage, the truck panel
         self.pa, self._pa_id = [], 0                        # announcements for the tablet to speak
         self.stock, self._stock_key = None, None            # a regular map's own bus lines
         self._page = (0, "")                                # console.html mtime, version hash
@@ -618,11 +619,11 @@ class Helper:
             self.stock = None
 
     def page_version(self):
-        f = os.path.join(HERE, "console.html")
-        mt = os.path.getmtime(f)
+        files = [os.path.join(HERE, f) for f in ("console.html", "freight.js", "freight.css")]
+        mt = max(os.path.getmtime(f) for f in files)
         if mt != self._page[0]:
             import hashlib
-            self._page = (mt, hashlib.sha1(open(f, "rb").read()).hexdigest()[:12])
+            self._page = (mt, hashlib.sha1(b"".join(open(f, "rb").read() for f in files)).hexdigest()[:12])
         return self._page[1]
 
     def _record(self, sh, early=False):
@@ -685,6 +686,7 @@ class Helper:
             with self.lock:
                 if m.get("type") == "pose":
                     self.game = m | {"seen": time.time()}
+                    self.freight.update(m)
                     if time.time() - self._nav_t > 0.25:    # directions: 4 times a second is plenty
                         self._nav_t = time.time()
                         for words in self.nav.update(m.get("lat"), m.get("lon"), m.get("speed", 0),
@@ -698,7 +700,12 @@ class Helper:
                     else:
                         self.rides.update(m)
                 elif m.get("type") == "places":
-                    self.rides.on_places(m)
+                    if not self.freight.on_places(m):             # freight asked for its own (ids "fq…")
+                        self.rides.on_places(m)
+                elif m.get("type") == "vehicles":
+                    self.freight.on_vehicles(m)
+                elif m.get("type") == "freight":
+                    self.freight.on_game(m)
                 elif m.get("type") == "debug":
                     self.debug = m
                 elif m.get("type") == "seats":
@@ -707,9 +714,11 @@ class Helper:
                     self.route = {"version": m.get("version"), "points": m.get("points") or [],
                                   "dist": m.get("dist"), "dur": m.get("dur"), "steps": m.get("steps") or []}
                     self.rides.on_route(self.route)
+                    self.freight.on_route(self.route)
                     self.nav.set_route(self.route)
                 elif m.get("type") == "hello":
                     self.game["seen"] = time.time()
+                    self.freight.on_hello()
                     self.game["earth"] = m.get("earth")
                     if m.get("mapPort"):
                         self.map_port = int(m["mapPort"])
@@ -863,6 +872,7 @@ class Helper:
                             "lights": bool(g.get("lights"))},
                    "shift": self.shift.view() if self.shift else None,
                    "rides": self.rides.view(),
+                   "freight": self.freight.view(),
                    "sign": self.sign | {"next": self.sign["stops"][self.sign["idx"]] if self.sign["stops"] else None,
                                         "locked": self.shift_running()},
                    "data": {"ready": self.routes_data() is not None, "bake": self.bake_state,
@@ -913,6 +923,11 @@ class Helper:
             if self.people.is_generic(name):                   # a built-in person: a drawn pictogram
                 return 200, self.people.avatar_png(name), "image/png"
             return 404, b"no avatar", "text/plain"
+        if method == "GET" and path == "/api/freight/board":
+            with self.lock:
+                if qs.get("hub"):
+                    self.freight.set_market(qs["hub"])
+                return js(self.freight.board())
         if method == "GET" and path == "/api/people":
             return js(self.rides.people_info())
         if method == "GET" and path == "/api/days":
@@ -943,7 +958,8 @@ class Helper:
             static = {"/": ("console.html", "text/html; charset=utf-8"), "/index.html": ("console.html", "text/html; charset=utf-8"),
                       "/manifest.json": ("manifest.json", "application/manifest+json"), "/sw.js": ("sw.js", "text/javascript"),
                       "/icon.svg": ("icon.svg", "image/svg+xml"), "/icon-512.png": ("icon-512.png", "image/png"),
-                      "/m3color.js": ("m3color.js", "text/javascript")}
+                      "/m3color.js": ("m3color.js", "text/javascript"), "/freight.js": ("freight.js", "text/javascript"),
+                      "/freight.css": ("freight.css", "text/css")}
             if path in static:
                 f, ctype = static[path]
                 return 200, open(os.path.join(HERE, f), "rb").read(), ctype
@@ -963,6 +979,8 @@ class Helper:
                 return js({"page": self.page_version()})
         elif method == "POST":
             if path == "/api/start" and self.routes_data():
+                if self.freight.active():
+                    return js({"ok": False, "error": "Finish or cancel the freight job first"})
                 self.start(body["pattern"], body.get("trip"), bool(body.get("live")), body.get("go", True))
                 return js({"ok": True})
             if path == "/api/theme":
@@ -990,12 +1008,30 @@ class Helper:
             if path == "/api/bake":
                 self.bake_async()
                 return js({"ok": True})
+            if path == "/api/freight":
+                act = body.get("action")
+                with self.lock:
+                    if act == "start":
+                        if self.shift_running():
+                            return js({"ok": False, "error": "End the bus shift first"})
+                        self.rides.go_online(False)               # a freight job and Rides exclude each other
+                    ok, res = self.freight.act(body)
+                return js({"ok": ok, "error": None if ok else res, "offer": res if ok and act == "plan" else None})
+            if path == "/api/truck":                          # the truck control panel: a button, or the PTO RPM
+                with self.lock:
+                    if body.get("name") == "pto":
+                        self.send([{"cmd": "pto", "rpm": body.get("rpm") or 0}])
+                    elif isinstance(body.get("name"), str):
+                        self.send([{"cmd": "truck", "name": body["name"]}])
+                return js({"ok": True})
             if path == "/api/rides":
                 act = body.get("action")
                 with self.lock:
                     if act == "online":
                         if self.shift_running():
                             return js({"ok": False, "error": "End the bus shift first"})
+                        if self.freight.active():
+                            return js({"ok": False, "error": "Finish or cancel the freight job first"})
                         self.rides.go_online(True)
                     elif act == "offline":
                         self.rides.go_online(False)

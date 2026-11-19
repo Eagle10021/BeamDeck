@@ -84,6 +84,14 @@ class NavScreen(ctx: CarContext, private val renderer: MapRenderer) : Screen(ctx
 
     private fun game(): JSONObject? = HelperClient.state?.optJSONObject("game")
     private fun rides(): JSONObject? = HelperClient.state?.optJSONObject("rides")
+    /** The freight job, while one is being set up or driven (the tablet's Freight mode); null otherwise. */
+    private fun freight(): JSONObject? = HelperClient.state?.optJSONObject("freight")
+        ?.takeIf { it.optString("state") in listOf("resolving", "spawning", "driving") && it.optJSONObject("job") != null }
+
+    private fun clock(secs: Int): String {
+        val s = Math.abs(secs); val h = s / 3600; val m = s % 3600 / 60
+        return if (h > 0) "%d:%02d".format(h, m) else "%d:%02d".format(m, s % 60)
+    }
 
     /** New helper data (twice a second). */
     private fun onData() {
@@ -150,6 +158,13 @@ class NavScreen(ctx: CarContext, private val renderer: MapRenderer) : Screen(ctx
     }
 
     private fun pins(): List<MapRenderer.Pin> {
+        val fj = freight()?.takeIf { it.optString("state") == "driving" }?.optJSONObject("job")
+        if (fj != null) {
+            val stops = fj.optJSONArray("stops") ?: return emptyList()
+            return (0 until stops.length()).mapNotNull { stops.optJSONObject(it) }
+                .filter { !it.optBoolean("done") && it.has("lat") }
+                .map { MapRenderer.Pin(it.optDouble("lat"), it.optDouble("lon"), if (it.optBoolean("now")) "#f06ac0" else "#ffb547") }
+        }
         val r = rides() ?: return emptyList()
         val q = r.optJSONObject("req") ?: return emptyList()
         val out = mutableListOf<MapRenderer.Pin>()
@@ -177,6 +192,12 @@ class NavScreen(ctx: CarContext, private val renderer: MapRenderer) : Screen(ctx
     }
 
     private fun destination(): String? {
+        val f = freight(); val job = f?.optJSONObject("job")
+        if (job != null && f.optString("state") == "driving") {
+            val n = job.optJSONArray("stops")?.length() ?: 0
+            val name = job.optJSONObject("stop")?.optString("name")
+            if (name != null) return (if (job.optInt("idx") >= n) "Drop-off: " else "Stop ${job.optInt("idx")} of $n: ") + name
+        }
         val r = rides(); val q = r?.optJSONObject("req")
         if (q != null && r.optString("state") in listOf("to_pickup", "boarding")) return "Pickup: " + q.optJSONObject("pickup")?.optString("name")
         if (q != null && r.optString("state") == "on_trip") return "Drop-off: " + q.optJSONObject("dest")?.optString("name")
@@ -192,6 +213,14 @@ class NavScreen(ctx: CarContext, private val renderer: MapRenderer) : Screen(ctx
             return "Can't reach Real Routes: ${HelperClient.lastError}"
         if (g == null || !g.optBoolean("connected")) return "Waiting for BeamNG"
         if (!g.optBoolean("ready")) return "Waiting for BeamNG.Earth's world"
+        freight()?.let { f ->
+            val job = f.optJSONObject("job")
+            val title = job?.optString("title") ?: "Freight"
+            return if (f.optString("state") == "driving") {
+                val left = job?.optInt("left") ?: 0
+                "$title · " + (if (left < 0) "late by ${clock(left)}" else "${clock(left)} left") + " · cargo ${job?.optInt("cond") ?: 100}%"
+            } else job?.optString("stage")?.takeIf { it.isNotBlank() } ?: "Setting up the truck…"
+        }
         val r = rides()
         return when (r?.optString("state")) {
             "online" -> "Online · finding riders"
@@ -209,9 +238,15 @@ class NavScreen(ctx: CarContext, private val renderer: MapRenderer) : Screen(ctx
         val strip = ActionStrip.Builder()
         val r = rides()
         val online = r != null && r.optString("state") != "offline"
-        strip.addAction(Action.Builder().setTitle(if (online) "Go offline" else "Go online")
+        val fj = freight()?.optJSONObject("job")
+        if (fj != null) {
+            val left = fj.optInt("left")
+            strip.addAction(Action.Builder().setTitle(if (freight()?.optString("state") == "driving")
+                (if (left < 0) "Late " else "") + clock(left) + " · $" + fj.optInt("pay") else "Freight")
+                .setOnClickListener { }.build())
+        } else strip.addAction(Action.Builder().setTitle(if (online) "Go offline" else "Go online")
             .setOnClickListener { HelperClient.ride(carContext, if (online) "offline" else "online") }.build())
-        if (r?.optJSONObject("req") != null && r.optString("state") in listOf("to_pickup", "boarding", "on_trip"))
+        if (fj == null && r?.optJSONObject("req") != null && r.optString("state") in listOf("to_pickup", "boarding", "on_trip"))
             strip.addAction(Action.Builder().setTitle("Cancel ride").setOnClickListener { HelperClient.ride(carContext, "cancel") }.build())
         val b = NavigationTemplate.Builder().setActionStrip(strip.build())
             .setMapActionStrip(ActionStrip.Builder().addAction(Action.Builder()
