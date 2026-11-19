@@ -136,3 +136,5 @@ body.fdriving .modes { display: none; }
 .fbanner b { font-weight: 800; } .fbanner .go { margin-left: auto; flex: none; }
 .fneed { margin-top: 2px; line-height: 1.7; } .cap.swap { cursor: pointer; background: var(--md-secondary-container); color: var(--md-on-secondary-container); font-size: 13px; padding: 4px 12px; }
 .cap.swap:active { scale: .95; }
+.jbar { height: 8px; border-radius: 999px; background: var(--panel2); overflow: hidden; } .jbar i { display: block; height: 100%; width: 0; background: var(--md-primary); transition: width .5s; }
+.jstage b { color: var(--text); }

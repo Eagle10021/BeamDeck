@@ -89,9 +89,18 @@ b = get("api/freight/board")
 offer = next(o for o in b["offers"] if o["scenario"] == "corridor_run")
 r = post("api/freight", {"action": "start", "offer": offer["id"]})
 ok(r["ok"], "take the corridor run")
-ok(wait(lambda: fr()["state"] == "driving", 20, "the rig"), "the fake mod spawned the rig and the job is driving")
+ok(wait(lambda: fr()["state"] == "to_pickup", 20, "the truck"), "the fake mod spawned the truck and the job asks for a drive to the pickup")
 sp = [c for c in g.log if c.get("cmd") == "freightSpawn"][-1]
-ok(sp["trailers"][0]["model"] == "eu_trailers" and sp["truck"]["config"] == perch["key"], "spawn asked for the Percheron + a European trailer")
+ok(sp["trailers"][0]["model"] == "eu_trailers" and sp["truck"]["config"] == perch["key"], "spawn asked for the Percheron + a European trailer, to be hooked on at the pickup")
+ok(not [c for c in g.log if c.get("cmd") == "freightLoad"], "no trailer or load before the pickup")
+shot("4d_to_pickup")
+pk = fr()["job"]["pickup"]
+ok(pk["dist_km"] is not None and pk["dist_km"] > 1, f"the pickup is {pk['dist_km']} km away")
+g.lat, g.lon, g.speed, g.speed_goal = pk["lat"] + 0.0001, pk["lon"], 0.0, 0.0                   # arrive and stop
+ok(wait(lambda: fr()["state"] == "loading", 10, "loading"), "stopping at the pickup starts loading")
+shot("4e_loading", wait_s=2.5)
+ok(wait(lambda: fr()["state"] == "driving", 40, "the load"), "the load is on and the drive begins")
+ok([c for c in g.log if c.get("cmd") == "freightLoad"], "the game was asked to hook the trailer on at the pickup")
 g.speed_goal = 24.0
 ok(wait(lambda: fr()["tel"].get("speed", 0) > 40, 25, "speed"), "truck is moving; live telemetry is flowing")
 # truck controls
@@ -135,7 +144,7 @@ job = fr()["job"]
 for k in range(len(job["stops"])):
     stop = fr()["job"]["stop"]
     g.lat, g.lon, g.speed, g.speed_goal = stop["lat"] + 0.0002, stop["lon"], 0.0, 0.0
-    ok(wait(lambda: fr()["state"] in ("done", "driving") and (fr()["state"] == "done" or fr()["job"]["idx"] > k + 1), 10, "delivery"), f"drop {k + 1}/{len(job['stops'])} delivered")
+    ok(wait(lambda: fr()["state"] in ("done", "driving") and (fr()["state"] == "done" or fr()["job"]["idx"] > k + 1), 20, "delivery"), f"drop {k + 1}/{len(job['stops'])} delivered (after unloading)")
 ok(wait(lambda: fr()["state"] == "done", 10, "done"), "job complete")
 shot("7_summary")
 post("api/freight", {"action": "dismiss"})

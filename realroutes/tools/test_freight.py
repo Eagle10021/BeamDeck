@@ -8,6 +8,11 @@ F.time = types.SimpleNamespace(time=lambda: clock[0], strftime=time.strftime)
 
 sent = []
 fr = F.Freight(lambda cmds: sent.extend(cmds), tempfile.mkdtemp())
+def hold(lat, lon, secs, speed=0.0, **kw):
+    """Stand (or drive) at a point for some seconds of the test clock, 10 poses a second."""
+    for _ in range(int(secs * 10)):
+        clock[0] += 0.1
+        fr.update({"type": "pose", "lat": lat, "lon": lon, "speed": speed, "gx": 0, "gy": 0, "heading": 90, **kw})
 ok = lambda cond, msg: print(("PASS " if cond else "FAIL ") + msg) or (cond or sys.exit(1))
 cmds = lambda name: [c for c in sent if c.get("cmd") == name]
 
@@ -128,8 +133,28 @@ sp = cmds("freightSpawn")[0]
 ok(sp["truck"]["model"] == "percheron" and sp["needs"] == "tractor", "spawn request names the truck")
 ok(sp["trailers"][0]["family"] == "eu" and sp["trailers"][0]["model"] == "eu_trailers", "Percheron gets the European trailers first")
 ok(any(t["family"] == "us" for t in sp["trailers"]), "...then the US ones as a fallback")
-fr.on_game({"type": "freight", "id": offer["id"], "event": "ready", "coupled": True, "trailer": "box3a", "trailerName": "eu_trailers box3a", "hitch": "fifthwheel_v2"})
-ok(fr.state == "driving" and cmds("gpsTo") and cmds("markers"), "rig ready: driving, GPS and markers sent")
+ok(sp["deferLoad"] and 1400 <= F.dist_m((sp["at"]["lat"], sp["at"]["lon"]), (fr.job["pts"][0]["lat"], fr.job["pts"][0]["lon"])) <= 2700,
+   "the truck is set down 1.5-2.6 km short of the pickup, with no load yet")
+fr.on_game({"type": "freight", "id": offer["id"], "event": "ready"})
+ok(fr.state == "to_pickup", "the truck is in place: drive to the pickup")
+gp = cmds("gpsTo")[-1]; mk = cmds("markers")[-1]["stops"]
+ok(gp["name"].startswith("Pickup:") and mk[0]["kind"] == "pickup", "GPS and a pickup marker point at the pickup")
+ok(not cmds("freightLoad"), "nothing is loaded yet")
+pk = fr.job["pts"][0]
+hold(pk["lat"], pk["lon"], 1.0, speed=12.0)
+ok(fr.state == "to_pickup", "driving through the pickup does not load")
+hold(pk["lat"], pk["lon"], 0.3)
+ok(fr.state == "loading" and cmds("freightLoad"), "stopping at the pickup starts loading and asks the game for the trailer")
+ld = cmds("freightLoad")[-1]
+ok(ld["trailers"][0]["model"] == "eu_trailers" and ld["kind"] == "none", "the trailer is hooked on at the pickup (a semi carries its load in the trailer)")
+hold(pk["lat"], pk["lon"], 2.0, speed=8.0)                                      # rolling away while it loads
+left0 = fr.job["load_left"]
+hold(pk["lat"], pk["lon"], 1.0, speed=8.0)
+ok(abs(fr.job["load_left"] - left0) < 0.01, "loading waits while the truck moves")
+fr.on_game({"type": "freight", "id": offer["id"], "event": "loaded", "coupled": True, "trailer": "box3a", "trailerName": "eu_trailers box3a", "hitch": "fifthwheel_v2"})
+ok(fr.state == "loading", "loading is not finished until the time is up")
+hold(pk["lat"], pk["lon"], fr.job["load_s"] + 1)
+ok(fr.state == "driving" and fr.job.get("started"), "loaded: the clock starts and the drive begins")
 ok(fr.view()["job"]["rig"]["hitch"] == "fifthwheel_v2", "the view shows the hitch")
 
 # telemetry flows through to the view
@@ -144,9 +169,11 @@ ok(fr.view()["tel"]["speed"] == 79 and fr.view()["tel"]["ccT"] == 79, "speed and
 # drive to each drop
 for k, s in enumerate(fr.job["pts"][1:], start=1):
     ok(fr.job["idx"] == k, f"heading for drop {k}: {s['name']}")
-    fr.update(pose(s["lat"], s["lon"], speed=15.0))          # arrives at speed: not a stop
+    hold(s["lat"], s["lon"], 0.5, speed=15.0)                # arrives at speed: not a stop
     ok(fr.job["idx"] == k, "no delivery while still moving")
-    fr.update(pose(s["lat"], s["lon"], speed=0.2))           # stopped at the drop
+    hold(s["lat"], s["lon"], 1.0)                            # stopped, still unloading
+    ok(fr.job["idx"] == k and fr.view()["job"]["unload_pct"] > 0, "standing still at the drop starts the unloading")
+    hold(s["lat"], s["lon"], F.UNLOAD_S)                     # the load is off
     if k < len(fr.job["pts"]) - 1:
         ok(fr.job["idx"] == k + 1, f"delivered drop {k}, now heading for the next")
 ok(fr.state == "done", "last drop delivered: done")
@@ -156,15 +183,29 @@ ok(sm["score"]["pay"] > 0 and fr.stats["jobs"] == 1 and fr.stats["history"], "pa
 sent.clear(); fr.dismiss()
 ok(cmds("freightClear") and fr.state == "idle", "dismiss removes the trailer and returns to the board")
 
+# --- the truck's own built-in loads, by cargo
+lk = F.load_kind
+ok(lk("Steel pipes", "flatbed") == "pipes" and lk("Timber", "flatbed") == "wood" and lk("Marble slabs", "flatbed") == "marble" and lk("Bricks", "flatbed") == "boxes",
+   "a rigid flatbed carries pipes, wood, a marble block or storage boxes to match the cargo")
+ok(lk("Parcels", "box") == "pallets" and lk("Crushed stone", "dump") == "rocks", "a box body carries pallets, a tipper rocks")
+ok(lk("Raw milk", "tanker") == "tanker:milk" and lk("Heating oil", "tanker") == "tanker:diesel" and lk("Petrol", "tanker") == "tanker:petroleum" and lk("Water", "tanker") == "tanker:water",
+   "a tanker carries the right liquid")
+ok(lk("Packaged goods", "tractor") == "none" and lk("Ready-mix concrete", "mixer") == "none", "a trailer or a mixer carries its load itself")
+
 # --- failures and rough driving
 fr.set_market("Kingston", refresh=True)
 o2 = next(o for o in fr.board()["offers"] if o["fits"] and o["kind"] != "scenario")
 fr.start(o2["id"]); fr.on_game({"id": o2["id"], "event": "fail", "why": "No trailer fits this truck's hitch."})
 ok(fr.state == "idle" and fr.summary and fr.summary["failed"], "a failed spawn returns to the board with the reason")
+fr.staging = False                                           # start at the pickup: it loads straight away
+fr.update(pose(45.4215, -75.6972))
 fr.start(o2["id"])
 for c in cmds("places")[-(1 + len(o2["stops"])):]:
     fr.on_places({"id": c["id"], "complete": True, "pending": False, "places": []})
-fr.on_game({"id": o2["id"], "event": "ready", "coupled": True, "trailer": "box3a"})
+fr.on_game({"id": o2["id"], "event": "ready"})
+ok(fr.state == "loading" and fr.job["pts"][0]["lat"] == [c for c in cmds("freightSpawn")][-1]["at"]["lat"], "starting at the pickup loads at once")
+fr.on_game({"id": o2["id"], "event": "loaded", "coupled": True, "trailer": "box3a"})
+hold(45.0, -75.0, fr.job["load_s"] + 1)
 start_cond = fr.job["cond"]
 for _ in range(240):                                           # twenty-four seconds of hard cornering, 10 Hz
     clock[0] += 0.1

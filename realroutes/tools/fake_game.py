@@ -41,6 +41,10 @@ NAMES = ["Costco Wholesale", "Canadian Tire", "Loblaws", "Shell", "Petro-Canada"
          "Giant Tiger", "Rona", "Independent Grocer", "Esso", "Sobeys"]
 
 
+LOADS = {"pipes": "10000kg Steel Pipes", "wood": "8400kg Wood Planks", "marble": "19000kg Marble Block", "boxes": "10x Cargo Box XL Slot",
+         "pallets": "20x Pallets with Boxes", "rocks": "15T Rocks & Boulders"}
+
+
 class FakeGame:
     def __init__(self, helper):
         self.h = helper
@@ -97,6 +101,11 @@ class FakeGame:
             self.pending = c
             self.spawn_at = time.time() + 1.2
             self.send({"type": "freight", "id": c["id"], "event": "stage", "text": "Moving to the pickup (the world has to load)…"})
+        elif k == "freightLoad":
+            self.load_cmd = c
+            self.load_at = time.time() + 1.5
+        elif k == "freightClear":
+            self.tr = 0
         elif k == "gpsTo":
             self.target = (c["lat"], c["lon"], c["name"])
             self.route_v += 1
@@ -112,8 +121,10 @@ class FakeGame:
             elif n == "park_off": self.pb = 0
             elif n == "cruise_on": self.cc, self.ccT = True, max(self.speed, 22.0)
             elif n == "cruise_off": self.cc = False
-            elif n == "cruise_up" and self.ccT: self.ccT += 1.389
-            elif n == "cruise_down" and self.ccT: self.ccT -= 1.389
+            elif n.startswith("cruise_up") or n.startswith("cruise_down"):
+                step = (1.389 if n in ("cruise_up", "cruise_down") else 0.2778) * (1 if "up" in n else -1)
+                if self.cc and self.ccT: self.ccT += step
+                elif self.speed > 8.3: self.cc, self.ccT = True, self.speed       # the first press engages at the current speed
             elif n.startswith("diff_"):
                 _, which, state = n.split("_")
                 self.dm[{"rear": "r", "front": "f", "inter": "i"}[which]] = "locked" if state == "lock" else "unlocked"
@@ -146,13 +157,19 @@ class FakeGame:
                 at = c["at"]
                 self.lat, self.lon, self.speed = at["lat"], at["lon"], 0.0
                 self.model = c["truck"]["model"]
-                tr = c["trailers"][0] if c["trailers"] else None
-                self.rig = tr
-                self.tr = 1 if tr else 0
+                self.spawn_cmd = c
+                self.tr = 0
                 self.has = {"ret": True, "cb": True, "la": self.model == "us_semi", "dr": True, "df": self.model in ("percheron",),
                             "di": True, "tc": self.model == "percheron", "fw": c["needs"] == "tractor", "mix": False, "pto": self.model in ("dumptruck", "us_semi")}
-                self.send({"type": "freight", "id": c["id"], "event": "ready", "coupled": True, "trailer": tr and tr["config"],
-                           "trailerName": tr and f"{tr['model']} {tr['config']}", "hitch": "fifthwheel_v2" if c["needs"] == "tractor" else "pintle" if tr else None})
+                self.send({"type": "freight", "id": c["id"], "event": "ready"})                    # the truck alone: the load comes at the pickup
+            if getattr(self, "load_cmd", None) and now >= self.load_at:
+                c, self.load_cmd = self.load_cmd, None
+                tr = c["trailers"][0] if c["trailers"] else None
+                self.tr = 1 if tr else 0
+                self.send({"type": "freight", "id": c["id"], "event": "loaded", "coupled": True, "trailer": tr and tr["config"],
+                           "trailerName": tr and f"{tr['model']} {tr['config']}",
+                           "loadName": LOADS.get(c.get("kind")), "loadKg": 10000 if c.get("kind") == "pipes" else None,
+                           "hitch": "fifthwheel_v2" if c["needs"] == "tractor" else "pintle" if tr else None})
             # drive towards the target
             if self.target and self.speed_goal:
                 la, lo, _ = self.target

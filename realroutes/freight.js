@@ -84,6 +84,12 @@ function offerHTML(o) {
   </div>`;
 }
 
+function paintStaging() {
+  const on = !fv || fv.staging !== false;
+  document.querySelectorAll("#fStaging button").forEach(b => b.classList.toggle("on", (b.dataset.v === "1") === on));
+}
+$("fStaging").onclick = async e => { const b = e.target.closest("button"); if (b) { await fpost({action: "staging", on: b.dataset.v === "1"}); paintStaging(); } };
+
 function paintJobs() {
   if (!fb) { $("fJobsList").innerHTML = `<div class="empty">Loading the job board…</div>`; return; }
   // the market town
@@ -99,6 +105,7 @@ function paintJobs() {
   const F = {all: () => true, fits: o => o.fits, local: o => o.kind === "local", regional: o => o.kind === "regional",
              long: o => o.kind === "long", scenario: o => o.kind === "scenario" || o.kind === "custom"};
   document.querySelectorAll("#fFilters button").forEach(b => b.classList.toggle("on", b.dataset.f === fFilter));
+  paintStaging();
   const list = fb.offers.filter(F[fFilter] || F.all);
   $("fJobsCount").textContent = `${list.length} of ${fb.offers.length} jobs`;
   const banner = !fb.truck ? `<div class="fbanner"><b>No truck picked yet.</b> Every job needs one: choose it in the Garage (your own saved configs are listed first, marked Custom).<button class="go" id="fToGarage" style="padding:10px 22px;font-size:16px">Open the Garage</button></div>` : "";
@@ -290,7 +297,8 @@ const CTRL = [
   ]},
   {g: "Cruise control", items: [
     {t: "tog", id: "cc", label: "Cruise", sub: t => t.cc && t.ccT ? t.ccT + " km/h" : "set at current speed", on: t => !!t.cc, send: t => t.cc ? "cruise_off" : "cruise_on"},
-    {t: "act", id: "ccd", label: "−5", name: "cruise_down", show: t => !!t.cc}, {t: "act", id: "ccu", label: "+5", name: "cruise_up", show: t => !!t.cc},
+    {t: "act", id: "ccd", label: "−5", name: "cruise_down"}, {t: "act", id: "ccd1", label: "−1", name: "cruise_down1"},
+    {t: "act", id: "ccu1", label: "+1", name: "cruise_up1"}, {t: "act", id: "ccu", label: "+5", name: "cruise_up"},
   ]},
   {g: "Driveline", items: [
     {t: "tog", id: "dr", label: "Rear diff lock", has: "dr", on: t => (t.dm || {}).r === "locked", send: t => (t.dm || {}).r === "locked" ? "diff_rear_unlock" : "diff_rear_lock"},
@@ -455,21 +463,34 @@ function paintPto(t) {
 
 // ---------------------------------------------------------------- the cockpit: the job strip
 function paintStrip(job, t, st) {
-  const s = $("fStrip");
-  const stage = job.stage && !(st.state === "driving") ? `<div class="jstage">⏳ ${esc(job.stage)}</div>` : "";
+  const s = $("fStrip"), phase = st.state;
   const drops = job.stops.map(p => `<span class="${p.done ? "done" : p.now ? "now" : ""}">${p.done ? "✓ " : ""}${esc(p.name)}</span>`).join("");
-  let nums = "";
-  if (st.state === "driving") {
+  let body = "";
+  if (phase === "resolving" || phase === "spawning") {
+    body = `<div class="jstage">⏳ ${esc(job.stage)}</div>`;
+  } else if (phase === "to_pickup") {
+    const pk = job.pickup || {};
+    body = `<div class="jstage">📍 Drive to the pickup: <b>${esc(pk.name || "")}</b></div>
+      <div class="jnums"><div><b>${fkm(pk.dist_km)}</b><span>To the pickup</span></div><div><b>${job.mins ? fdur(job.mins) : "–"}</b><span>Time allowed</span></div>
+      <div><b>–</b><span>Cargo · not loaded</span></div><div><b>${fm(job.pay)}</b><span>Pay</span></div></div>
+      <div class="jstage" style="padding:2px 0">The clock starts once the load is on. Stop in the pickup area to load.
+        <button class="cap" id="fSkip" style="cursor:pointer;margin-left:10px">Skip the drive</button></div>`;
+  } else if (phase === "loading") {
+    body = `<div class="jstage">📦 Loading ${esc(job.load)} · stay stopped · <b>${job.load_s ?? 0} s</b></div>
+      <div class="jbar"><i style="width:${job.load_pct || 0}%"></i></div>`;
+  } else if (phase === "driving") {
     const left = job.left, late = left < 0;
-    nums = `<div class="jnums">
+    const unl = job.unload_pct > 0 ? `<div class="jstage" style="padding:0">📤 Unloading · keep still</div><div class="jbar"><i style="width:${job.unload_pct}%"></i></div>` : "";
+    body = `<div class="jnums">
       <div><b class="${late ? "late" : left < 600 ? "late" : ""}">${late ? "+" : ""}${fclock(Math.abs(left))}</b><span>${late ? "Late by" : "Time left"}</span></div>
       <div><b>${fkm(job.dist_left_km)}</b><span>To next drop</span></div>
       <div><b class="${job.cond < 60 ? "bad" : job.cond < 85 ? "late" : ""}">${job.cond}%</b><span>Cargo${job.jolts ? ` · ${job.jolts} jolts` : ""}</span></div>
-      <div><b class="${job.tickets ? "bad" : ""}">${fm(job.pay)}</b><span>${job.tickets ? job.tickets + " ticket" + (job.tickets > 1 ? "s" : "") : "Pay"}</span></div></div>`;
+      <div><b class="${job.tickets ? "bad" : ""}">${fm(job.pay)}</b><span>${job.tickets ? job.tickets + " ticket" + (job.tickets > 1 ? "s" : "") : "Pay"}</span></div></div>${unl}`;
   }
-  s.innerHTML = `<div class="jt"><div class="ji">${job.icon}</div><div><b>${esc(job.title)}</b><small>${esc(job.load)} · ${job.weight} t · from ${esc(job.from)}${job.rig && job.rig.trailer_name ? " · " + esc(job.rig.trailer_name) : ""}</small></div>
-    <button class="jcancel" id="fCancel">Cancel job</button></div>${stage}<div class="jdrops">${drops}</div>${nums}`;
+  s.innerHTML = `<div class="jt"><div class="ji">${job.icon}</div><div><b>${esc(job.title)}</b><small>${esc(job.load)} · ${job.weight} t · from ${esc(job.from)}${job.rig && job.rig.trailer_name ? " · " + esc(job.rig.trailer_name) : ""}${job.rig && job.rig.load_name ? " · " + esc(job.rig.load_name) : ""}</small></div>
+    <button class="jcancel" id="fCancel">Cancel job</button></div><div class="jdrops">${drops}</div>${body}`;
   $("fCancel").onclick = () => { if (confirm("Cancel this job? The pay is lost.")) fpost({action: "cancel"}); };
+  const sk = $("fSkip"); if (sk) sk.onclick = () => fpost({action: "skip_to_pickup"});
 }
 
 // ---------------------------------------------------------------- summary
@@ -498,7 +519,7 @@ function fSummary(sm) {
 let lastActive = false;
 function renderFreight(st) {
   fv = st.freight; if (!fv) return;
-  const active = ["resolving", "spawning", "driving"].includes(fv.state);
+  const active = ["resolving", "spawning", "to_pickup", "loading", "driving"].includes(fv.state);
   const root = $("freight");
   root.classList.toggle("driving", active);
   document.body.classList.toggle("fdriving", active && mode === "freight");
@@ -512,10 +533,13 @@ function renderFreight(st) {
   if (active && fv.job) {
     paintStrip(fv.job, fv.tel || {}, fv);
     paintGauges(fv.tel || {}, fv.job); paintControls(fv.tel || {}, fv.job);
-    const stop = fv.job.stop;
-    fMap.hud(g, stop ? (fv.job.idx === fv.job.stops.length ? "Drop-off: " : "Stop: ") + stop.name : null);
+    const stop = fv.job.stop, pk = fv.job.pickup;
+    const rest = fv.job.stops.filter(p => !p.done && p.lat != null);
+    fMap.hud(g, fv.state === "to_pickup" && pk ? "Pickup: " + pk.name : stop ? (fv.job.idx === fv.job.stops.length ? "Drop-off: " : "Stop: ") + stop.name : null);
     fMap.turn(st.nav);
-    fMap.pins(fv.job.stops.filter(p => !p.done && p.lat != null).map((p, i) => ({lat: p.lat, lon: p.lon, color: p.now ? "#f06ac0" : "#ffb547", label: (p.now ? "Drop-off: " : "") + p.name, small: !p.now, next: p.now})));
+    const pins = rest.map(p => ({lat: p.lat, lon: p.lon, color: p.now ? "#f06ac0" : "#ffb547", label: (p.now ? "Drop-off: " : "") + p.name, small: !p.now, next: p.now}));
+    if (fv.state === "to_pickup" && pk) pins.unshift({lat: pk.lat, lon: pk.lon, color: "#4fd18b", label: "Pickup: " + pk.name});
+    fMap.pins(pins);
   } else fMap.pins([]);
 }
 

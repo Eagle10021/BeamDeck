@@ -3,12 +3,16 @@ garage to pick the truck, and a driving screen with live truck stats. Lives in t
 poses and the game's answers and sends its commands on.
 
 States: idle (browsing the board) -> resolving (finding real places for the pickup and drops) -> spawning (the mod
-puts the truck and a fitting trailer at the pickup) -> driving (deliver every drop) -> done (pay, rating).
+puts the truck near the pickup) -> to_pickup (drive there) -> loading (stand still while the trailer is hooked on or the
+load appears on the deck) -> driving (deliver every drop, standing still at each while it is unloaded) -> done (pay, rating).
 """
 import json, math, os, random, re, time
 import freight_data as D
 
 STOPPED_MS = 1.5                   # m/s: counts as stopped at a drop
+LOAD_S = (6, 16)                   # loading at the pickup takes this long (more for a heavy load), standing still
+UNLOAD_S = 4                       # standing still at a drop while it is unloaded
+STAGE_M = (1500, 2600)             # the truck is set down this far from the pickup (the drive to it is part of the job)
 ARRIVE_M = 60                      # metres from a drop (or the road end beside it)
 RESOLVE_S = 14                     # how long to wait for the game's places before using the town's centre
 SPAWN_S = 120                      # teleports and spawns can take a while
@@ -64,6 +68,31 @@ def round5(v):
     return int(round(v / 5.0) * 5)
 
 
+def load_kind(load, needs):
+    """Which of the truck's own built-in loads suits this job (the mod picks the part nearest the job's weight):
+    a rigid flatbed carries pipes, wood, a marble block or storage boxes; a box body carries pallets; a tipper rocks;
+    a tanker its liquid. A trailer or a mixer carries its load itself ("none")."""
+    q = (load or "").lower()
+    if needs == "flatbed":
+        if "pipe" in q:
+            return "pipes"
+        if any(w in q for w in ("timber", "lumber", "wood", "plank")):
+            return "wood"
+        if "marble" in q:
+            return "marble"
+        return "boxes"
+    if needs == "box":
+        return "pallets"
+    if needs == "dump":
+        return "rocks"
+    if needs == "tanker":
+        for words, fluid in ((("diesel", "heating"), "diesel"), (("petrol", "fuel", "gas"), "petroleum"), (("milk",), "milk"), (("water",), "water")):
+            if any(w in q for w in words):
+                return "tanker:" + fluid
+        return "tanker:dynamic"
+    return "none"
+
+
 class Freight:
     def __init__(self, send, data_dir, announce=None):
         self.send = send                     # send(list of game commands)
@@ -76,6 +105,7 @@ class Freight:
         self.models = []                     # what the game reported: [{model, brand, name, type, configs: [...]}]
         self.models_at = 0
         self.favourites = ["percheron"]
+        self.staging = True                  # start away from the pickup and drive to it (off: start at the pickup)
         try:
             saved = json.load(open(self.file))
             self.stats.update(saved.get("stats", {}))
@@ -84,6 +114,7 @@ class Freight:
             self.models = saved.get("models", [])
             self.models_at = saved.get("models_at", 0)
             self.favourites = saved.get("favourites", self.favourites)
+            self.staging = saved.get("staging", True)
             if saved.get("models_v") != MODELS_V:           # an older list lacks the parts and custom flags: ask again
                 self.models_at = 0
         except Exception:
@@ -107,13 +138,14 @@ class Freight:
     def _save(self):
         try:
             json.dump({"stats": self.stats, "truck": self.truck, "overrides": self.overrides, "models": self.models,
-                       "models_at": self.models_at, "favourites": self.favourites, "models_v": MODELS_V}, open(self.file + ".part", "w"))
+                       "models_at": self.models_at, "favourites": self.favourites, "models_v": MODELS_V,
+                       "staging": self.staging}, open(self.file + ".part", "w"))
             os.replace(self.file + ".part", self.file)
         except OSError:
             pass
 
     def active(self):
-        return self.state in ("resolving", "spawning", "driving")
+        return self.state in ("resolving", "spawning", "to_pickup", "loading", "driving")
 
     def note(self, kind, text):
         self.events.append({"t": round(time.time(), 1), "kind": kind, "text": text})
@@ -549,14 +581,19 @@ class Freight:
         if cands:
             k = random.randrange(min(3, len(cands)))
             cands = cands[k:] + cands[:k] if k and cands[k]["family"] == cands[0]["family"] else cands
+        j["cands"], j["load_kind"] = cands, load_kind(o["load"], cargo["needs"])
         first = j["pts"][0]
+        at = {"lat": first["lat"], "lon": first["lon"], "name": first["name"]}
+        j["staged"] = bool(self.staging)
+        if self.staging:                                       # set down short of the pickup: the drive there is part of the job
+            la, lo = offset((first["lat"], first["lon"]), random.uniform(0, 360), random.uniform(*STAGE_M))
+            at = {"lat": la, "lon": lo, "name": "Near " + first["name"]}
         self.state = "spawning"
         j["spawn_at"] = time.time()
-        j["stage"] = "Moving the truck to the pickup…"
+        j["stage"] = "Moving the truck…"
         self.send([{"cmd": "freightSpawn", "id": j["id"], "truck": {"model": j["truck"]["model"], "config": j["truck"]["config"]},
-                    "at": {"lat": first["lat"], "lon": first["lon"], "name": first["name"]},
-                    "heading": bearing((first["lat"], first["lon"]), (j["pts"][1]["lat"], j["pts"][1]["lon"])),
-                    "trailers": cands, "needs": cargo["needs"], "load": o["load"]}])
+                    "at": at, "heading": bearing((at["lat"], at["lon"]), (first["lat"], first["lon"])),
+                    "trailers": cands, "needs": cargo["needs"], "load": o["load"], "deferLoad": True}])
         self.v += 1
 
     # ------------------------------------------------------------------ the game's replies
@@ -567,25 +604,61 @@ class Freight:
             return
         if ev == "stage":
             j["stage"] = m.get("text", j["stage"])
-        elif ev == "ready" and self.state == "spawning":
+        elif ev == "ready" and self.state == "spawning":              # the truck is in place (no load yet)
+            if j.get("staged"):
+                self.state = "to_pickup"
+                j["stage"] = "Drive to the pickup"
+                self._pickup_cmds()
+                self.say(f"Job accepted: {j['offer']['load']}. Drive to the pickup: {j['pts'][0]['name']}.", "ok")
+            else:
+                self._begin_loading()
+        elif ev == "loaded" and self.state in ("loading", "driving"):  # the trailer is hooked on / the load is on the deck
             j["rig"] = {"trailer": m.get("trailer"), "hitch": m.get("hitch"), "coupled": bool(m.get("coupled")),
-                        "trailer_name": m.get("trailerName")}
-            j["started"] = time.time()
-            self.state = "driving"
-            j["stage"] = "Driving"
-            tr = j["rig"]["trailer"]
-            if tr and not j["rig"]["coupled"]:
+                        "trailer_name": m.get("trailerName"), "load_name": m.get("loadName"), "load_kg": m.get("loadKg")}
+            if m.get("loadKg"):
+                j["weight_actual"] = round(m["loadKg"] / 1000, 1)       # the weight of the load part the game put on
+            j["loaded_event"] = True
+            if m.get("noLoad") and j.get("load_kind") != "none":
+                self.say("This truck has no built-in load for that cargo: carry on as if it were loaded.", "warn", 7, False)
+            if m.get("trailer") and not m.get("coupled"):
                 self.say(f"The {m.get('trailerName') or 'trailer'} is in place but not hooked up yet. "
                          "Back onto it and press the coupler button.", "warn", 9)
-            self._leg_cmds(first=True)
-            self.say(f"Job started: {j['offer']['load']} to {j['pts'][1]['name']}.", "ok")
         elif ev == "fail":
             self._fail(m.get("why") or "The truck could not be set up")
+
+    def _pickup_cmds(self):
+        j = self.job
+        p = j["pts"][0]
+        self.send([{"cmd": "gpsTo", "lat": p["lat"], "lon": p["lon"], "name": "Pickup: " + p["name"]},
+                   {"cmd": "markers", "stops": [{"lat": p["lat"], "lon": p["lon"], "name": p["name"], "kind": "pickup", "next": True}]}])
+        j["await_route"], j["spot"] = True, None
+
+    def _begin_loading(self):
+        j = self.job
+        o = j["offer"]
+        self.state = "loading"
+        j["load_s"] = min(LOAD_S[1], LOAD_S[0] + o["weight"] * 0.4)
+        j["load_left"], j["load_at"], j["loaded_event"] = j["load_s"], time.time(), False
+        j["stage"] = "Loading: stay stopped"
+        cargo = D.CARGO_BY_ID[o["cargo"]]
+        self.send([{"cmd": "gpsClear"}, {"cmd": "freightLoad", "id": j["id"], "trailers": j["cands"], "kind": j["load_kind"],
+                                           "weightKg": round(o["weight"] * 1000), "needs": cargo["needs"], "load": o["load"]}])
+        self.say(f"Loading {o['load']}. Stay stopped.", "ok", 6)
+        self.v += 1
+
+    def _start_driving(self):
+        j = self.job
+        self.state = "driving"
+        j["started"] = time.time()
+        j["stage"] = "Driving"
+        self._leg_cmds(first=True)
+        self.say(f"Loaded. Deliver to {j['pts'][1]['name']}.", "ok")
+        self.v += 1
 
     def _fail(self, why):
         j = self.job
         self.note("bad", why)
-        self.send([{"cmd": "notify", "text": why, "secs": 9}, {"cmd": "markers", "stops": []}, {"cmd": "gpsClear"}])
+        self.send([{"cmd": "notify", "text": why, "secs": 9}, {"cmd": "markers", "stops": []}, {"cmd": "gpsClear"}, {"cmd": "freightClear"}])
         self.state = "idle"
         self.job = None
         self.summary = {"failed": True, "why": why, "title": j["offer"]["title"] if j else ""}
@@ -612,17 +685,20 @@ class Freight:
         """BeamNG.Earth planned a route: the road's own duration sets the time allowed, and where it ends beside the
         drop is where the truck has to stop."""
         j = self.job
-        if not (j and self.state == "driving" and j.get("await_route")):
+        if not (j and self.state in ("to_pickup", "driving") and j.get("await_route")):
             return
         pts = route.get("points") or []
         if pts:
-            p = self._stop_pt()
+            p = j["pts"][0] if self.state == "to_pickup" else self._stop_pt()
             end = pts[-1]
             for q in reversed(pts[:-1]):
                 if dist_m((q[0], q[1]), (p["lat"], p["lon"])) >= 6:
                     end = q
                     break
             j["spot"] = (end[0], end[1])
+        if self.state == "to_pickup":
+            j["await_route"] = False
+            return
         if route.get("dur") and j["idx"] == 1 and not j.get("est_set"):
             # first leg only: the road's own time replaces the estimate (a truck is slower than a car)
             j["est_set"] = True
@@ -644,6 +720,8 @@ class Freight:
             self.send([{"cmd": "vehicles"}])
         if restarted and self.job and self.state == "driving":
             self._leg_cmds()
+        elif restarted and self.job and self.state == "to_pickup":
+            self._pickup_cmds()
 
     # ------------------------------------------------------------------ the driving loop (10 Hz)
     def update(self, m):
@@ -659,9 +737,28 @@ class Freight:
             if now - self.job["spawn_at"] > SPAWN_S:
                 self._fail("Timed out setting up the truck. Is BeamNG.Earth's world loaded?")
             return
+        j = self.job
+        if self.state in ("to_pickup", "loading"):
+            me = (m["lat"], m["lon"])
+            speed = m.get("speed", 0) or 0
+            if self.state == "to_pickup":
+                p = j["pts"][0]
+                near = dist_m(me, (p["lat"], p["lon"])) < ARRIVE_M or (j.get("spot") and dist_m(me, j["spot"]) < ARRIVE_M)
+                if near and speed < STOPPED_MS:
+                    self._begin_loading()
+                return
+            if speed < STOPPED_MS:
+                j["load_left"] -= dt
+            elif now - j.get("_move_say", 0) > 10:
+                j["_move_say"] = now
+                self.say("Stay stopped while it loads.", "warn", 4, False)
+            if j["load_left"] <= 0 and (j.get("loaded_event") or now - j["load_at"] > j["load_s"] + 45):
+                if not j.get("loaded_event"):
+                    self.say("The game did not confirm the load. Hook up or load by hand if needed.", "warn", 7)
+                self._start_driving()
+            return
         if self.state != "driving":
             return
-        j = self.job
         me = (m["lat"], m["lon"])
         speed = m.get("speed", 0) or 0
         j["dist_m"] += speed * dt
@@ -729,14 +826,19 @@ class Freight:
         p = self._stop_pt()
         near = dist_m(me, (p["lat"], p["lon"])) < ARRIVE_M or (j.get("spot") and dist_m(me, j["spot"]) < ARRIVE_M)
         if near and speed < STOPPED_MS:
-            j["drop_times"].append(round(now - j["started"]))
-            if j["idx"] == len(j["pts"]) - 1:
-                self._finish()
-            else:
-                self.say(f"Delivered at {p['name']}. Next: {j['pts'][j['idx'] + 1]['name']}.", "ok", 5)
-                j["idx"] += 1
-                self._leg_cmds()
-            self.v += 1
+            j["svc"] = j.get("svc", 0.0) + dt                  # standing still while the load is taken off
+            if j["svc"] >= UNLOAD_S:
+                j["svc"] = 0.0
+                j["drop_times"].append(round(now - j["started"]))
+                if j["idx"] == len(j["pts"]) - 1:
+                    self._finish()
+                else:
+                    self.say(f"Delivered at {p['name']}. Next: {j['pts'][j['idx'] + 1]['name']}.", "ok", 5)
+                    j["idx"] += 1
+                    self._leg_cmds()
+                self.v += 1
+        elif not near or speed > STOPPED_MS * 2:
+            j["svc"] = 0.0
 
     def _tel(self, m):
         """The live truck stats and control states the tablet shows."""
@@ -794,7 +896,7 @@ class Freight:
         entry = {"t": round(time.time()), "title": o["title"], "icon": o["icon"], "load": o["load"], "from": j["pts"][0]["name"],
                  "to": j["pts"][-1]["name"], "stops": len(j["pts"]) - 1, "km": o["km"], "km_driven": km_driven,
                  "pay": s["pay"], "stars": s["stars"], "cond": round(j["cond"]), "mins": s["mins"], "late": s["late"],
-                 "truck": j["truck"].get("name"), "label": j["truck"].get("label"), "weight": o["weight"], "fuel_l": fuel_l,
+                 "truck": j["truck"].get("name"), "label": j["truck"].get("label"), "weight": j.get("weight_actual") or o["weight"], "fuel_l": fuel_l,
                  "avg_kmh": round(km_driven / max(0.05, (time.time() - j["started"]) / 3600), 1), "max_kmh": round(j["max_kmh"])}
         st["history"] = ([entry] + st["history"])[:150]
         self.summary = {"job": entry, "score": s, "tickets": j["tickets"], "jolts": j["jolts"], "crashes": j["crash"],
@@ -837,6 +939,17 @@ class Freight:
         if a == "recouple":
             self.send([{"cmd": "freightRecouple"}])
             return True, ""
+        if a == "skip_to_pickup":
+            if self.state != "to_pickup":
+                return False, "Not on the way to a pickup"
+            p = self.job["pts"][0]
+            self.send([{"cmd": "freightGoto", "lat": p["lat"], "lon": p["lon"], "name": p["name"]}])
+            return True, ""
+        if a == "staging":
+            self.staging = bool(body.get("on"))
+            self.v += 1
+            self._save()
+            return True, ""
         if a == "trucks":                                 # ask the game for its list again
             self.send([{"cmd": "vehicles"}])
             return True, ""
@@ -846,7 +959,7 @@ class Freight:
         if not self.active():
             return False, "No job to cancel"
         title = self.job["offer"]["title"]
-        self.send([{"cmd": "markers", "stops": []}, {"cmd": "gpsClear"}])
+        self.send([{"cmd": "markers", "stops": []}, {"cmd": "gpsClear"}, {"cmd": "freightClear"}])
         self.note("warn", f"Cancelled {title}")
         self.state = "idle"
         self.job = None
@@ -869,14 +982,24 @@ class Freight:
         if not j:
             return None
         o = j["offer"]
-        out = {"id": j["id"], "title": o["title"], "icon": o["icon"], "load": o["load"], "weight": o["weight"],
+        out = {"id": j["id"], "title": o["title"], "icon": o["icon"], "load": o["load"], "weight": j.get("weight_actual") or o["weight"],
                "needs": o["needs"], "fragile": o["fragile"], "hazard": o["hazard"], "km": o["km"], "stage": j["stage"],
                "from": j["pts"][0]["name"], "stops": [{"name": p["name"], "lat": p["lat"], "lon": p["lon"], "done": k < j["idx"], "now": k == j["idx"] and self.state == "driving"}
                                                       for k, p in enumerate(j["pts"]) if k > 0],
-               "idx": j["idx"], "cond": round(j["cond"]), "jolts": j["jolts"], "tickets": j["tickets"], "mins": j["mins"],
+               "idx": j["idx"], "phase": self.state, "cond": round(j["cond"]), "jolts": j["jolts"], "tickets": j["tickets"], "mins": j["mins"],
                "truck": j["truck"], "rig": j["rig"], "trailer": o.get("trailer"), "pay": o["pay"], "crash": j["crash"]}
+        if self.state == "to_pickup":
+            p = j["pts"][0]
+            gl = (self.pose or {}).get("gpsLeft")
+            me = self._me()
+            out["pickup"] = {"name": p["name"], "lat": p["lat"], "lon": p["lon"],
+                             "dist_km": round((gl if gl else dist_m(me, (p["lat"], p["lon"])) * 1.25) / 1000, 1) if me else None}
+        if self.state == "loading":
+            out["load_pct"] = round(max(0.0, min(1.0, 1 - j["load_left"] / j["load_s"])) * 100)
+            out["load_s"] = round(max(0, j["load_left"]))
         if self.state == "driving":
             now = time.time()
+            out["unload_pct"] = round(min(1.0, j.get("svc", 0.0) / UNLOAD_S) * 100) if j.get("svc") else 0
             out["elapsed"] = round(now - j["started"])
             out["left"] = round(j["mins"] * 60 - (now - j["started"]))
             p = self._stop_pt()
@@ -897,7 +1020,7 @@ class Freight:
         self._market_tick()
         return {"state": self.state, "connected": self.connected(), "truck": self.truck, "job": self._job_view(),
                 "summary": self.summary, "tel": self.tel if self.connected() else {}, "v": self.v,
-                "hub": self.market["hub"], "balance": self.stats["balance"], "jobs": self.stats["jobs"],
+                "hub": self.market["hub"], "balance": self.stats["balance"], "jobs": self.stats["jobs"], "staging": self.staging,
                 "events": self.events[-6:], "garage": len(self.models), "caps": sorted(self.truck_caps())}
 
     def board(self):

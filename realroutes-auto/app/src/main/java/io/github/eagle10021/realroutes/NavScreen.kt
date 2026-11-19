@@ -86,7 +86,7 @@ class NavScreen(ctx: CarContext, private val renderer: MapRenderer) : Screen(ctx
     private fun rides(): JSONObject? = HelperClient.state?.optJSONObject("rides")
     /** The freight job, while one is being set up or driven (the tablet's Freight mode); null otherwise. */
     private fun freight(): JSONObject? = HelperClient.state?.optJSONObject("freight")
-        ?.takeIf { it.optString("state") in listOf("resolving", "spawning", "driving") && it.optJSONObject("job") != null }
+        ?.takeIf { it.optString("state") in listOf("resolving", "spawning", "to_pickup", "loading", "driving") && it.optJSONObject("job") != null }
 
     private fun clock(secs: Int): String {
         val s = Math.abs(secs); val h = s / 3600; val m = s % 3600 / 60
@@ -158,10 +158,12 @@ class NavScreen(ctx: CarContext, private val renderer: MapRenderer) : Screen(ctx
     }
 
     private fun pins(): List<MapRenderer.Pin> {
-        val fj = freight()?.takeIf { it.optString("state") == "driving" }?.optJSONObject("job")
+        val fj = freight()?.takeIf { it.optString("state") in listOf("to_pickup", "driving") }?.optJSONObject("job")
         if (fj != null) {
             val stops = fj.optJSONArray("stops") ?: return emptyList()
-            return (0 until stops.length()).mapNotNull { stops.optJSONObject(it) }
+            val pk = fj.optJSONObject("pickup")?.takeIf { it.has("lat") }
+                ?.let { listOf(MapRenderer.Pin(it.optDouble("lat"), it.optDouble("lon"), "#4fd18b")) } ?: emptyList()
+            return pk + (0 until stops.length()).mapNotNull { stops.optJSONObject(it) }
                 .filter { !it.optBoolean("done") && it.has("lat") }
                 .map { MapRenderer.Pin(it.optDouble("lat"), it.optDouble("lon"), if (it.optBoolean("now")) "#f06ac0" else "#ffb547") }
         }
@@ -193,6 +195,8 @@ class NavScreen(ctx: CarContext, private val renderer: MapRenderer) : Screen(ctx
 
     private fun destination(): String? {
         val f = freight(); val job = f?.optJSONObject("job")
+        if (job != null && f.optString("state") == "to_pickup")
+            return "Pickup: " + (job.optJSONObject("pickup")?.optString("name") ?: "")
         if (job != null && f.optString("state") == "driving") {
             val n = job.optJSONArray("stops")?.length() ?: 0
             val name = job.optJSONObject("stop")?.optString("name")
@@ -216,7 +220,11 @@ class NavScreen(ctx: CarContext, private val renderer: MapRenderer) : Screen(ctx
         freight()?.let { f ->
             val job = f.optJSONObject("job")
             val title = job?.optString("title") ?: "Freight"
-            return if (f.optString("state") == "driving") {
+            return if (f.optString("state") == "to_pickup") {
+                "$title · drive to the pickup · not loaded yet"
+            } else if (f.optString("state") == "loading") {
+                "$title · loading · stay stopped (${job?.optInt("load_s") ?: 0} s)"
+            } else if (f.optString("state") == "driving") {
                 val left = job?.optInt("left") ?: 0
                 "$title · " + (if (left < 0) "late by ${clock(left)}" else "${clock(left)} left") + " · cargo ${job?.optInt("cond") ?: 100}%"
             } else job?.optString("stage")?.takeIf { it.isNotBlank() } ?: "Setting up the truck…"
@@ -242,7 +250,7 @@ class NavScreen(ctx: CarContext, private val renderer: MapRenderer) : Screen(ctx
         if (fj != null) {
             val left = fj.optInt("left")
             strip.addAction(Action.Builder().setTitle(if (freight()?.optString("state") == "driving")
-                (if (left < 0) "Late " else "") + clock(left) + " · $" + fj.optInt("pay") else "Freight")
+                (if (left < 0) "Late " else "") + clock(left) + " · $" + fj.optInt("pay") else if (freight()?.optString("state") == "to_pickup") "To pickup" else if (freight()?.optString("state") == "loading") "Loading" else "Freight")
                 .setOnClickListener { }.build())
         } else strip.addAction(Action.Builder().setTitle(if (online) "Go offline" else "Go online")
             .setOnClickListener { HelperClient.ride(carContext, if (online) "offline" else "online") }.build())

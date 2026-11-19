@@ -532,13 +532,118 @@ end
 local function rigDone(coupled)
   rig.stage = "done"
   local c = rig.cand
-  send({type = "freight", id = rig.id, event = "ready", coupled = coupled and true or false,
+  send({type = "freight", id = rig.id, event = rig.defer and "loaded" or "ready", coupled = coupled and true or false,
         trailer = c and c.config or nil, trailerName = c and (c.model .. " " .. c.config) or nil,
-        hitch = rig.pair and rig.pair.tag or nil})
+        hitch = rig.pair and rig.pair.tag or nil, loadName = rig.loadLabel, loadKg = rig.loadKg, noLoad = rig.noLoad or nil})
+end
+
+-- after the trailer: the truck's own load part (pipes, planks, boxes...), or done
+local function rigTrailerDone(coupled)
+  rig.coupled = coupled
+  if rig.loadKind and rig.loadKind ~= "none" then rig.stage = "loadpart" else rigDone(coupled) end
+end
+
+-- ---- the loads a truck ships with: slots in its parts tree (a flatbed's pipes, planks, marble block or cargo boxes, a box
+-- body's pallets, a tipper's rocks, a tanker's liquid). The part whose weight is nearest the job's is switched on
+-- when the truck is loaded at the pickup, and the truck reloads in place (about a second) like it does for a seat.
+local LOAD_PATTERNS = {                         -- kind -> part-name pieces, the first being preferred
+  pipes = {"load_pipes"}, wood = {"load_woodplanks", "woodplanks"},
+  marble = {"load_marble_mount", "marble_block"}, boxes = {"cargo_load_box"},
+  pallets = {"load_pallet", "cargo_load_box"}, rocks = {"load_rocks"},
+}
+-- a part's weight in kg from its display name ("10000kg Steel Pipes", "15T Rocks"), or an estimate from the box or
+-- pallet count in its name ("cargo_load_box_20XL", "load_pallet_x10"); the second value says it is an estimate
+local function kgOf(label, partName)
+  local kg = tostring(label):match("(%d[%d%.]*)%s*kg")
+  if kg then return tonumber(kg), false end
+  local t = tostring(label):match("(%d[%d%.]*)%s*T%f[%W]")
+  if t then return tonumber(t) * 1000, false end
+  local pn = tostring(partName or ""):lower()
+  local boxes = pn:match("cargo_load_box_(%d+)xl")
+  if boxes then return tonumber(boxes) * 600, true end
+  local pallets = pn:match("load_pallet_x(%d+)")
+  if pallets then return tonumber(pallets) * 800, true end
+  return nil, false
+end
+local function loadTree(vid)
+  local vd = core_vehicle_manager.getVehicleData(vid)
+  return vd, vd and vd.config and vd.config.partsTree
+end
+local function availableParts(vd)
+  local ok, io = pcall(require, "jbeam/io")
+  if not (ok and io and io.getAvailableParts and vd.ioCtx) then return {} end
+  local ok2, parts = pcall(io.getAvailableParts, vd.ioCtx)
+  return ok2 and parts or {}
+end
+-- the best slot + part for a pattern list: the earlier the pattern the better, then the closest weight
+local function chooseLoad(vd, tree, patterns, wantKg, skip)
+  local parts = availableParts(vd)
+  local best
+  local function walk(n)
+    for _, c in pairs(n.children or {}) do
+      if type(c.suitablePartNames) == "table" then
+        for _, pn in ipairs(c.suitablePartNames) do
+          local lp = pn:lower()
+          for rank, pat in ipairs(patterns) do
+            if lp:find(pat, 1, true) and not (skip and lp:find(skip, 1, true)) and not lp:find("downpipe", 1, true)
+               and not lp:find("tanker_pipes", 1, true) then
+              local info = parts[pn] and parts[pn].information
+              local label = info and type(info.name) == "string" and info.name or pn
+              local kg, approx = kgOf(label, pn)
+              local score = rank * 1e6 + (kg and math.abs(kg - wantKg) or 5e5)
+              if not best or score < best.score then
+                best = {node = c, part = pn, label = label, kg = (not approx) and kg or nil, score = score}
+              end
+              break
+            end
+          end
+        end
+      end
+      walk(c)
+    end
+  end
+  walk(tree)
+  return best
+end
+local function setLoadPart(vid, vd, tree, best)
+  best.node.chosenPartName = best.part
+  core_vehicle_partmgmt.setConfig({partsTree = deepcopy(tree)}, true, vid)
+end
+-- first step: the load part itself; a marble block comes with a rail mount, and the block follows once the mount is in
+local function applyLoadPart()
+  local vd, tree = loadTree(rig.truckId)
+  if not tree then rig.noLoad = true; return false end
+  local kind = rig.loadKind
+  local patterns = LOAD_PATTERNS[kind]
+  local skip
+  if kind:sub(1, 7) == "tanker:" then
+    patterns = {"tanker_load_" .. kind:sub(8), "tanker_load_dynamic"}
+  end
+  if not patterns then rig.noLoad = true; return false end
+  local best = chooseLoad(vd, tree, patterns, rig.wantKg or 10000, "chain")
+  if not best then rig.noLoad = true; return false end
+  rig.loadLabel, rig.loadKg = best.label, best.kg
+  if kind == "marble" and best.part:lower():find("mount", 1, true) then rig.second = "marble" end
+  setLoadPart(rig.truckId, vd, tree, best)
+  return true
+end
+local function applySecondPart()
+  local vd, tree = loadTree(rig.truckId)
+  if not tree then return false end
+  local block = chooseLoad(vd, tree, {"marble_block"}, rig.wantKg or 10000, "chain")
+  if block and not block.part:lower():find("mount", 1, true) then
+    rig.loadLabel, rig.loadKg = block.label, block.kg or rig.loadKg
+    block.node.chosenPartName = block.part
+    local chain = chooseLoad(vd, tree, {"marble_block_chain"}, 0)         -- its chains, when the slot is there
+    if chain then chain.node.chosenPartName = chain.part end
+    core_vehicle_partmgmt.setConfig({partsTree = deepcopy(tree)}, true, rig.truckId)
+    return true
+  end
+  return false
 end
 
 local function rigUpdate()
-  if not rig or rig.stage == "done" then return end
+  if not rig or rig.stage == "done" or rig.stage == "waiting" then return end
   local now = os.clockhp()
   if now - rig.t0 > 110 then rigFail("Setting up the truck took too long."); return end
   local a = api()
@@ -560,7 +665,20 @@ local function rigUpdate()
     elseif now - rig.next > 75 then rig.stage, rig.next = "settle", now end      -- gave up waiting: carry on
   elseif rig.stage == "settle" then
     if now >= rig.next then
-      if #rig.trailers > 0 then rig.stage = "trailer"; rig.tIdx = 1 else rigDone(nil) end
+      if rig.defer then
+        rig.stage = "waiting"                           -- the truck is in place; the load comes at the pickup (freightLoad)
+        send({type = "freight", id = rig.id, event = "ready"})
+      elseif #rig.trailers > 0 then rig.stage = "trailer"; rig.tIdx = 1 else rigDone(nil) end
+    end
+  elseif rig.stage == "loadpart" then
+    rigSay("Loading…")
+    if applyLoadPart() then rig.stage, rig.next = "loadpart_wait", now + 3.5 else rigDone(rig.coupled) end
+  elseif rig.stage == "loadpart_wait" and now >= rig.next then
+    if rig.second then
+      rig.second = nil
+      if applySecondPart() then rig.next = now + 3.5 else rigDone(rig.coupled) end
+    else
+      rigDone(rig.coupled)
     end
   elseif rig.stage == "trailer" then
     local cand = rig.trailers[rig.tIdx]
@@ -596,10 +714,10 @@ local function rigUpdate()
     end
     rig.stage, rig.next, rig.tries = "verify", now + 1.5, 0
   elseif rig.stage == "verify" then
-    if rigCoupled() then rigDone(true)
+    if rigCoupled() then rigTrailerDone(true)
     elseif now >= rig.next then
       rig.tries = rig.tries + 1
-      if rig.tries >= 4 then rigDone(false)     -- not latched: the driver hooks it up
+      if rig.tries >= 4 then rigTrailerDone(false)     -- not latched: the driver hooks it up
       else rigCouple(); rig.next = now + 2.5 end
     end
   end
@@ -609,7 +727,7 @@ local function rigStart(c)
   if rig and rig.id == c.id and rig.stage ~= "done" then return end    -- a repeated command
   rigClearTrailers()
   rig = {id = c.id, truck = c.truck, dest = c.at, trailers = c.trailers or {}, prefer = PREFER[c.needs] or {},
-         stage = "wait_truck", t0 = os.clockhp(), next = os.clockhp() + 1.2}
+         stage = "wait_truck", t0 = os.clockhp(), next = os.clockhp() + 1.2, defer = c.deferLoad == true}
   rigSay("Spawning the truck…")
   core_vehicles.replaceVehicle(c.truck.model, {config = "vehicles/" .. c.truck.model .. "/" .. c.truck.config .. ".pc"})
 end
@@ -640,8 +758,12 @@ local TRUCK_CMDS = {
   trailer_air = "energyStorage.getStorageSafe('mainAirTank'):toggleConsumerPressureCoef()",
   cruise_on = "extensions.use('cruiseControl').holdCurrentSpeed()",
   cruise_off = "extensions.use('cruiseControl').setEnabled(false)",
-  cruise_up = "extensions.use('cruiseControl').changeSpeed(1.389)",
-  cruise_down = "extensions.use('cruiseControl').changeSpeed(-1.389)",
+  -- changeSpeed switches cruise on at the stored target (100 km/h at first), so with cruise off the first press
+  -- engages it at the current speed instead (the game needs 30 km/h or more for that)
+  cruise_up = "local cc = extensions.use('cruiseControl') if cc.getConfiguration().isEnabled then cc.changeSpeed(1.389) else cc.holdCurrentSpeed() end",
+  cruise_down = "local cc = extensions.use('cruiseControl') if cc.getConfiguration().isEnabled then cc.changeSpeed(-1.389) else cc.holdCurrentSpeed() end",
+  cruise_up1 = "local cc = extensions.use('cruiseControl') if cc.getConfiguration().isEnabled then cc.changeSpeed(0.2778) else cc.holdCurrentSpeed() end",
+  cruise_down1 = "local cc = extensions.use('cruiseControl') if cc.getConfiguration().isEnabled then cc.changeSpeed(-0.2778) else cc.holdCurrentSpeed() end",
   bed_up = "electrics.values.hydraulicPTOControl = 1",
   bed_stop = "electrics.values.hydraulicPTOControl = 0",
   bed_down = "electrics.values.hydraulicPTOControl = -1",
@@ -1193,6 +1315,24 @@ handlers.notify = function(c) message(c.text, c.secs) end
 handlers.vehicles = function() listVehicles() end
 handlers.freightSpawn = function(c) rigStart(c) end
 handlers.freightClear = function() rigClearTrailers(); rig = nil end
+-- the driver chose to skip the drive to the pickup
+handlers.freightGoto = function(c)
+  local a = api()
+  if a and a ~= flat and a.teleport and tonumber(c.lat) and tonumber(c.lon) then a.teleport(c.lat, c.lon, c.name) end
+end
+-- at the pickup: hook the trailer on and / or put the load on the deck
+handlers.freightLoad = function(c)
+  if not (rig and rig.stage == "waiting" and rig.id == c.id) then return end
+  rig.loadKind = type(c.kind) == "string" and c.kind or "none"
+  rig.wantKg = tonumber(c.weightKg) or 10000
+  rig.trailers = c.trailers or rig.trailers
+  rig.prefer = PREFER[c.needs] or rig.prefer
+  rig.t0 = os.clockhp()
+  rigSay("Loading…")
+  if #rig.trailers > 0 then rig.stage, rig.tIdx = "trailer", 1
+  elseif rig.loadKind ~= "none" then rig.stage = "loadpart"
+  else rigDone(nil) end
+end
 handlers.freightRecouple = function()
   if rig and rig.truckId and rig.trailerId then rigCouple(); rig.stage, rig.next, rig.tries = "verify", os.clockhp() + 1.5, 0 end
 end
