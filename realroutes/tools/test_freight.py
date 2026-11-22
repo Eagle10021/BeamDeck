@@ -1,5 +1,5 @@
 """Headless test of Freight with a fake game: python3 tools/test_freight.py"""
-import os, sys, tempfile, time
+import json, os, sys, tempfile, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import types
 import freight as F, freight_data as D
@@ -232,11 +232,12 @@ ok(fr.job["lost_s"] > 3 and fr.job.get("_lost_said"), "an unhooked trailer is no
 ok(fr.cancel()[0] and fr.state == "idle" and cmds("gpsClear"), "cancel clears the route")
 
 # --- options: tickets and penalties (ETS2/ATS style)
-ok(fr.view()["tickets_on"] and fr.view()["penalties_on"], "tickets and penalties are on by default")
+ok(fr.view()["tickets_on"] and fr.view()["damage_on"] and fr.view()["late_on"], "fines, damage and late rules are on by default")
 fr.act({"action": "tickets", "on": False})
-fr.act({"action": "penalties", "on": False})
-ok(not fr.tickets and not fr.penalties and not fr.view()["tickets_on"] and not fr.view()["penalties_on"],
-   "tickets and penalties can be toggled off like ETS2/ATS")
+fr.act({"action": "damage", "on": False})
+fr.act({"action": "late", "on": False})
+ok(not fr.tickets and not fr.damage and not fr.late and not fr.view()["tickets_on"] and not fr.view()["damage_on"]
+   and not fr.view()["late_on"], "each rule can be switched off on its own like ETS2/ATS")
 fr.start(o2["id"])
 for c in cmds("places")[-(1 + len(o2["stops"])):]:
     fr.on_places({"id": c["id"], "complete": True, "pending": False, "places": []})
@@ -251,9 +252,23 @@ fr.job["cond"] = 50.0
 fr.job["started"] = time.time() - (fr.job["mins"] + 30) * 60
 sc = fr._score(fr.job)
 ok(sc["fines"] == 0 and sc["cond_f"] == 1.0 and sc["time_f"] == 1.0 and sc["stars"] == 5.0 and sc["pay"] == o2["pay"],
-   "with penalties off, damaged cargo and late delivery still receive full pay and 5 stars")
+   "with every rule off, damaged cargo and late delivery still receive full pay and 5 stars")
+# one rule at a time: only that part of the pay and stars is forgiven
+fr.act({"action": "late", "on": True})
+sc = fr._score(fr.job)
+ok(sc["cond_f"] == 1.0 and sc["time_f"] < 1.0 and sc["stars"] < 5.0, "late delivery on alone: the time penalty applies, damage is free")
+fr.act({"action": "late", "on": False})
+fr.act({"action": "damage", "on": True})
+sc = fr._score(fr.job)
+ok(sc["cond_f"] < 1.0 and sc["time_f"] == 1.0 and sc["stars"] < 5.0, "damage on alone: the damage penalty applies, lateness is free")
 fr.cancel()
 fr.act({"action": "tickets", "on": True})
-fr.act({"action": "penalties", "on": True})
+fr.act({"action": "damage", "on": True})
+fr.act({"action": "late", "on": True})
+# an older save with the single "penalties" switch carries over to both new ones
+_d = tempfile.mkdtemp()
+json.dump({"penalties": False}, open(os.path.join(_d, "freight.json"), "w"))
+_old = F.Freight(lambda c: None, _d)
+ok(not _old.damage and not _old.late and _old.tickets, "an older save's single penalties switch carries over to damage and late")
 
 print("\nall freight tests passed")

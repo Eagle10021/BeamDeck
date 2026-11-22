@@ -109,7 +109,8 @@ class Freight:
         self.favourites = ["percheron"]
         self.staging = True                  # start away from the pickup and drive to it (off: start at the pickup)
         self.tickets = True                  # traffic offenses / speeding tickets (like ETS2/ATS: off = no fines or tickets)
-        self.penalties = True                # late & damage deductions (off = full base pay guaranteed, no deductions)
+        self.damage = True                   # cargo damage lowers the pay and stars (off = damage is free)
+        self.late = True                     # late delivery lowers the pay and stars (off = no time penalty)
         try:
             saved = json.load(open(self.file))
             self.stats.update(saved.get("stats", {}))
@@ -120,7 +121,9 @@ class Freight:
             self.favourites = saved.get("favourites", self.favourites)
             self.staging = saved.get("staging", True)
             self.tickets = saved.get("tickets", True)
-            self.penalties = saved.get("penalties", True)
+            old = saved.get("penalties", True)               # the earlier single switch covered both
+            self.damage = saved.get("damage", old)
+            self.late = saved.get("late", old)
             if saved.get("models_v") != MODELS_V:           # an older list lacks the parts and custom flags: ask again
                 self.models_at = 0
         except Exception:
@@ -147,7 +150,7 @@ class Freight:
         try:
             json.dump({"stats": self.stats, "truck": self.truck, "overrides": self.overrides, "models": self.models,
                        "models_at": self.models_at, "favourites": self.favourites, "models_v": MODELS_V,
-                       "staging": self.staging, "tickets": self.tickets, "penalties": self.penalties}, open(self.file + ".part", "w"))
+                       "staging": self.staging, "tickets": self.tickets, "damage": self.damage, "late": self.late}, open(self.file + ".part", "w"))
             os.replace(self.file + ".part", self.file)
         except OSError:
             pass
@@ -844,10 +847,10 @@ class Freight:
         # --- time left
         left = j["mins"] * 60 - (now - j["started"])
         for mark, txt in ((600, "10 minutes left."), (120, "Two minutes left."),
-                          (0, "You are late: the pay drops now." if self.penalties else "You are past scheduled time.")):
+                          (0, "You are late: the pay drops now." if self.late else "You are past scheduled time.")):
             if left <= mark and not j.get(f"_t{mark}") and (left > mark - 30 or mark == 0):
                 j[f"_t{mark}"] = True
-                self.say(txt, "warn" if mark else ("bad" if self.penalties else "warn"), 4, mark != 600)
+                self.say(txt, "warn" if mark else ("bad" if self.late else "warn"), 4, mark != 600)
         # --- arrived at a drop?
         p = self._stop_pt()
         near = dist_m(me, (p["lat"], p["lon"])) < ARRIVE_M or (j.get("spot") and dist_m(me, j["spot"]) < ARRIVE_M)
@@ -887,22 +890,20 @@ class Freight:
         now = time.time()
         mins = (now - j["started"]) / 60
         cond = j["cond"]
-        if self.penalties:
-            cf = max(0.3, min(1.0, cond / 90))
-            if mins <= j["mins"]:
-                tf = 1 + 0.1 * (j["mins"] - mins) / j["mins"]
-            else:
-                tf = max(0.5, 1 - 0.6 * (mins - j["mins"]) / j["mins"])
+        cf = max(0.3, min(1.0, cond / 90)) if self.damage else 1.0
+        if mins <= j["mins"]:
+            tf = 1 + 0.1 * (j["mins"] - mins) / j["mins"]                 # the early bonus stays whatever the options
         else:
-            cf = 1.0
-            tf = (1 + 0.1 * (j["mins"] - mins) / j["mins"]) if mins <= j["mins"] else 1.0
+            tf = max(0.5, 1 - 0.6 * (mins - j["mins"]) / j["mins"]) if self.late else 1.0
 
         fines = (TICKET * j["tickets"]) if self.tickets else 0.0
         pay = max(o["pay"] * 0.1, o["pay"] * cf * tf - fines)
         stars = 5.0
-        if self.penalties:
+        if self.damage:
             stars -= max(0.0, (90 - cond) / 22)
+        if self.late:
             stars -= 0 if mins <= j["mins"] else min(2.0, 2.0 * (mins - j["mins"]) / j["mins"])
+        if self.late or self.damage:
             stars -= 0.5 if j.get("_lost_said") else 0
         if self.tickets:
             stars -= 0.4 * j["tickets"]
@@ -934,7 +935,7 @@ class Freight:
         st["history"] = ([entry] + st["history"])[:150]
         self.summary = {"job": entry, "score": s, "tickets": j["tickets"], "jolts": j["jolts"], "crashes": j["crash"],
                         "title": o["title"], "drops": j["drop_times"],
-                        "tickets_on": self.tickets, "penalties_on": self.penalties}
+                        "tickets_on": self.tickets, "damage_on": self.damage, "late_on": self.late}
         self.state = "done"
         self.send([{"cmd": "markers", "stops": []}, {"cmd": "gpsClear"},
                    {"cmd": "notify", "text": f"Delivered! +${s['pay']:.2f} ({s['stars']}★)", "secs": 7}])
@@ -989,13 +990,8 @@ class Freight:
             self.v += 1
             self._save()
             return True, ""
-        if a == "tickets":
-            self.tickets = bool(body.get("on"))
-            self.v += 1
-            self._save()
-            return True, ""
-        if a == "penalties":
-            self.penalties = bool(body.get("on"))
+        if a in ("tickets", "damage", "late"):            # the rules, each on its own like ETS2 / ATS
+            setattr(self, a, bool(body.get("on")))
             self.v += 1
             self._save()
             return True, ""
@@ -1070,7 +1066,7 @@ class Freight:
         return {"state": self.state, "connected": self.connected(), "truck": self.truck, "job": self._job_view(),
                 "summary": self.summary, "tel": self.tel if self.connected() else {}, "v": self.v,
                 "hub": self.market["hub"], "balance": self.stats["balance"], "jobs": self.stats["jobs"],
-                "staging": self.staging, "tickets_on": self.tickets, "penalties_on": self.penalties,
+                "staging": self.staging, "tickets_on": self.tickets, "damage_on": self.damage, "late_on": self.late,
                 "mod_old": self.mod_old(), "mod_ver": self.mod_ver,
                 "events": self.events[-6:], "garage": len(self.models), "caps": sorted(self.truck_caps())}
 
