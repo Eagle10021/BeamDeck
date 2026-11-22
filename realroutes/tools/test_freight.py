@@ -64,7 +64,8 @@ fr3.select_truck("percheron", "xl500_6x4_fifthwheel_m"); fr3.set_market("Ottawa"
 ok(not fr3.mod_old(), "right after the helper starts the mod's version is simply not known yet")
 fr3.on_hello({"type": "hello"})                                          # an old mod sends no version
 ok(fr3.mod_old() and fr3.view()["mod_old"], "a game whose mod sends no version is reported as running an older mod")
-okk, why = fr3.start(fr3.market["offers"][0]["id"])
+fitting = next(o for o in fr3.market["offers"] if fr3.fits(o)[0])           # a job this truck can carry, so only the mod check can refuse it
+okk, why = fr3.start(fitting["id"])
 ok(not okk and "Ctrl+L" in why, "a job is not started against an older mod, and the reason says what to do")
 fr3.on_hello({"type": "hello", "rr": F.MOD_REQUIRED})
 ok(not fr3.mod_old(), "the current mod is accepted")

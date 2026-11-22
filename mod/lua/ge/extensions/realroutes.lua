@@ -1185,16 +1185,24 @@ end
 -- choose occupant parts (seatId -> part name) and reload the car once
 local function applyParts(vid, changes)
   if not next(changes) and not M._partsRewritten then return end
-  local vd, changed = nil, false
+  local vd, changed, parts, needTree = nil, false, {}, false
   for sid, part in pairs(changes) do
     local node, d = occupantNode(vid, sid)
     vd = vd or d
-    if node and node.chosenPartName ~= part then node.chosenPartName = part; changed = true
+    if node and node.chosenPartName ~= part then
+      node.chosenPartName = part; changed = true
+      if node.id then parts[node.id] = part else needTree = true end
     elseif not node then log("W", "realroutes", "no occupant slot found for seat " .. tostring(sid)) end
   end
   if M._partsRewritten then changed = true; M._partsRewritten = nil end   -- a part file changed: reload anyway
   if changed and vd then
-    core_vehicle_partmgmt.setConfig({partsTree = deepcopy(vd.config.partsTree)}, true, vid)
+    if needTree then
+      core_vehicle_partmgmt.setConfig({partsTree = deepcopy(vd.config.partsTree)}, true, vid)
+    else
+      -- only the changed slots go in: the whole tree is huge to serialize (it froze the game) and resets parts the player added
+      vd.config.partsTree = nil
+      core_vehicle_partmgmt.setConfig({parts = parts}, true, vid)
+    end
   end
 end
 
