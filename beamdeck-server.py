@@ -2192,6 +2192,14 @@ def open_head_host():
     p = HEAD_HOST["proc"]
     if p and p.poll() is None:
         return True
+    # the native tracker (realroutes/headtrack.py, no window, so nothing pauses it behind the game) when its environment
+    # is installed (install.sh / install.ps1: <data>/headtrack with mediapipe and opencv); else the browser page
+    py = os.path.join(DATA_DIR, "headtrack", "Scripts", "python.exe") if WINDOWS else os.path.join(DATA_DIR, "headtrack", "bin", "python")
+    if os.path.exists(py):
+        HEAD_HOST["proc"] = subprocess.Popen([py, os.path.join(HERE, "realroutes", "headtrack.py"), "--helper", f"http://127.0.0.1:{PORT}/routes"],
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                             **({"creationflags": 0x08000000} if WINDOWS else {"start_new_session": True}))
+        return True
     import importlib.util
     spec = importlib.util.spec_from_file_location("bd_launch", os.path.join(HERE, "beamdeck-launch.py"))
     launch = importlib.util.module_from_spec(spec)

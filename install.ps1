@@ -79,6 +79,24 @@ if (-not ((Test-Path $piperPy) -and (& $piperPy -c "import piper" 2>$null; $LAST
     & $piperPy -c "import piper" 2>$null
     if ($LASTEXITCODE -ne 0) { Write-Warning "Piper couldn't be installed (needs Python 3.9-3.13): Real Routes speaks on the phone or tablet instead." }
 }
+# head tracking with this computer's camera from any screen: a native tracker in its own Python environment
+$htPy = "$data\headtrack\Scripts\python.exe"
+if (-not ((Test-Path $htPy) -and (& $htPy -c "import mediapipe, cv2" 2>$null; $LASTEXITCODE -eq 0))) {
+    if (-not $baseExe) {                         # (set above only when Piper was installed this time)
+        $baseArgs = @()
+        if (Get-Command py.exe -ErrorAction SilentlyContinue) {
+            foreach ($v in "3.12", "3.11", "3.10") { & py.exe "-$v" -c "1" 2>$null; if ($LASTEXITCODE -eq 0) { $baseExe = "py.exe"; $baseArgs = @("-$v"); break } }
+        }
+        if (-not $baseExe -and $py) { $baseExe = $py -replace 'pythonw\.exe$', 'python.exe' }
+    }
+    if ($baseExe) {
+        if (Test-Path "$data\headtrack") { Remove-Item "$data\headtrack" -Recurse -Force }
+        & $baseExe @baseArgs -m venv "$data\headtrack"
+        & $htPy -m pip install -q mediapipe opencv-python-headless
+    }
+    & $htPy -c "import mediapipe, cv2" 2>$null
+    if ($LASTEXITCODE -ne 0) { Write-Warning "The head tracker couldn't be installed: the tablet's computer-camera option uses a browser window instead." }
+}
 New-Item -ItemType Directory -Force "$data\voices" | Out-Null
 $hf = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium"
 $voiceFiles = @{ "en_US-libritts_r-medium.onnx" = "10bb85e071d616fcf4071f369f1799d0491492ab3c5d552ec19fb548fac13195";
