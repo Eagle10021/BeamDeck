@@ -41,6 +41,7 @@ Copy-Item (Join-Path $here "mod\*") $mod -Recurse -Force
 Copy-Item (Join-Path $here "realroutes") $app -Recurse -Force   # Real Routes (bus routes on BeamNG.Earth)
 
 # Start menu shortcut: pythonw runs the launcher without a console window
+Write-Host "Installing BeamDeck files..."
 # Microsoft Store Python is skipped: its AppData virtualization hides %LOCALAPPDATA%\BeamDeck from it
 $notStore = { $_.Source -and $_.Source -notmatch '\\WindowsApps\\' }
 $py = (Get-Command pythonw.exe -All -ErrorAction SilentlyContinue | Where-Object $notStore | Select-Object -First 1).Source
@@ -56,7 +57,7 @@ else {
 
 if ($AndroidAuto -and -not (Test-Path "$data\dhu\desktop-head-unit.exe")) {
     $zip = Join-Path $env:TEMP "beamdeck-dhu.zip"
-    Invoke-WebRequest "https://dl.google.com/android/repository/desktop-head-unit-windows-x64_r02.1.zip" -OutFile $zip
+    Invoke-WebRequest "https://dl.google.com/android/repository/desktop-head-unit-windows-x64_r02.1.zip" -OutFile $zip -UseBasicParsing
     if ((Get-FileHash $zip -Algorithm SHA1).Hash.ToLower() -ne "c27bf84e59dda7b79315b6ca2a314063feffd6ac") { throw "Head unit download didn't match Google's checksum" }
     Expand-Archive $zip -DestinationPath "$data\dhu" -Force
     Remove-Item $zip
@@ -74,6 +75,7 @@ if (-not $piperOk) {
     }
     if (-not $baseExe -and $py) { $baseExe = $py -replace 'pythonw\.exe$', 'python.exe' }
     if ($baseExe) {
+        Write-Host "Setting up Piper offline speech (piper-tts)..."
         if (Test-Path "$data\piper") { Remove-Item "$data\piper" -Recurse -Force }
         & $baseExe @baseArgs -m venv "$data\piper"
         & $piperPy -m pip install -q piper-tts
@@ -94,6 +96,7 @@ if (-not $htOk) {
         if (-not $baseExe -and $py) { $baseExe = $py -replace 'pythonw\.exe$', 'python.exe' }
     }
     if ($baseExe) {
+        Write-Host "Setting up head tracking (mediapipe & opencv)..."
         if (Test-Path "$data\headtrack") { Remove-Item "$data\headtrack" -Recurse -Force }
         & $baseExe @baseArgs -m venv "$data\headtrack"
         & $htPy -m pip install -q mediapipe opencv-python-headless
@@ -109,7 +112,11 @@ foreach ($f in $voiceFiles.Keys) {
     $out = "$data\voices\$f"
     if ((Test-Path $out) -and (Get-FileHash $out -Algorithm SHA256).Hash.ToLower() -eq $voiceFiles[$f]) { continue }
     try {
-        Invoke-WebRequest "$hf/$f" -OutFile "$out.part"
+        Write-Host "Downloading speech voice $f..."
+        $origProgress = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest "$hf/$f" -OutFile "$out.part" -UseBasicParsing
+        $ProgressPreference = $origProgress
         if ((Get-FileHash "$out.part" -Algorithm SHA256).Hash.ToLower() -ne $voiceFiles[$f]) { throw "checksum" }
         Move-Item "$out.part" $out -Force
     } catch { Remove-Item "$out.part" -ErrorAction SilentlyContinue; Write-Warning "The speech voice $f couldn't be downloaded." }
