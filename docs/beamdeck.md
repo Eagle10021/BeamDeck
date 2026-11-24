@@ -7,6 +7,7 @@ Puts things on a car's own dash and GPS screens in **BeamNG.drive**:
 * **Any video**: YouTube, anything else `yt-dlp` supports, or a local file. Built for Bad Apple on a Vivace's centre screen.
 * **Music**: a local music library, a Navidrome server, or **any app's sound** (Spotify, a music player, a browser…) picked from a dropdown, with the song's cover, title and artist on the car screen.
 * **Android Auto** from an Android phone over a USB cable, like a real car (no developer mode, no Bluetooth), tapped by clicking the screen in the game, optionally with **BeamNG's own GPS map** drawn over Google Maps.
+* **Real Routes**: driving jobs with a tablet or PC console (bus routes, ride sharing and trucking), turn-by-turn directions, spoken announcements and webcam head tracking; with our CareerMP, the jobs pay into a multiplayer career (section 6b).
 
 The sound comes "from the car" (clear inside, muffled outside), heavy bass shakes the doors and body, and the screen dims with the headlights. The source is in the [repository root](..).
 
@@ -126,6 +127,10 @@ Nothing personal is built in: settings live in a per-user `config.json` (`~/.con
 
 **Windows:** `powershell -ExecutionPolicy Bypass -File tools\beamdeck\install.ps1` (add `-AndroidAuto` to fetch Google's Windows head unit, SHA-1 checked). Needs Python 3, `ffmpeg` and `yt-dlp` (`winget install Python.Python.3.12 Gyan.FFmpeg yt-dlp.yt-dlp`). It adds a **BeamDeck** Start-menu entry that starts the helper (`pythonw`, no console) and opens the window.
 
+**Sound output (Linux):** Settings › Sound Output › "BeamDeck plays on" keeps the window's sound (the car's music, Android Auto, app sound and Real Routes speech) on one device whatever the system default is; "System default" follows the PC. A chosen device that is unplugged falls back to the default until it is back.
+
+**Speech (Real Routes):** both installers set up [Piper](https://github.com/rhasspy/piper), an offline neural voice, in its own Python environment (`<data>/piper`, Python 3.9 to 3.13; on Linux `uv` provides one if needed) and download the `en_US-libritts_r-medium` voice (904 speakers, checksum checked) to `<data>/voices`. Without it, Real Routes speaks on the phone or the tablet instead.
+
 | Port | What |
 | :--- | :--- |
 | `127.0.0.1:47130` TCP | Helper: the window, API, stream proxies, WebSocket, `/debug` |
@@ -155,7 +160,7 @@ The same helper, window and mod run on Windows, and the Linux-only pieces have W
 
 ## 6b. Real Routes
 
-A driving job on top of BeamDeck: real bus routes from a GTFS feed, and a ride-share shift ("Rides"). It runs on BeamNG.Earth (real streets) and on regular maps.
+Driving jobs on top of BeamDeck: real bus routes from a GTFS feed, a ride-share shift ("Rides") and trucking ("Freight"). It runs on BeamNG.Earth (real streets) and on regular maps, stock or mod.
 
 ```
  Tablet console (web page)      Android Auto app            beamdeck-server.py                  BeamNG
@@ -175,6 +180,10 @@ A driving job on top of BeamDeck: real bus routes from a GTFS feed, and a ride-s
 | `api/rides`, `api/profile` | Rides: go online or offline, accept, decline, cancel; the driver's profile |
 | `api/seats` | The car's seats and who sits in them; put a character in a seat |
 | `api/music`, `api/music/cover` | The music bar: what is playing, and play / pause / next / previous / volume |
+| `api/prefs`, `api/say`, `api/theme` | Settings every screen shares (mode, map, speech); test speech; each device's Material You colour |
+| `api/freight`, `api/freight/board`, `api/truck`, `api/vehicle/preview` | Trucking: the job board, starting and cancelling jobs, the garage; the truck panel's controls; truck pictures |
+| `api/career` | CareerMP: the main and second job |
+| `api/head`, `api/head/probe` | Head tracking: the view the webcam page worked out, passed on to the game |
 
 **Two kinds of map.** On BeamNG.Earth, positions are real latitudes and longitudes, places and routes come from its API, and the consoles draw OpenFreeMap's streets. On a regular map a small "flat" adapter stands in: a latitude and longitude are made up from the game's x and y, places come from the map's own points of interest, routes from BeamNG's route planner, and the consoles draw the level's own roads (sent once as `roads.json`).
 
@@ -204,6 +213,37 @@ Things found building it:
 5. **A long mesh as a flexbody on the occupant's nodes stretches** (the legs are far from the few torso nodes); rigid props keep their shape.
 6. **`TSStatic` shapes need the Torque node tree** `base00 > start01 > <mesh>_a<size>` to be drawn; vehicle meshes are plain named nodes.
 7. **`core_vehicle_partmgmt.setConfig`** is the exported name of the config merge (`mergeConfig` is local).
+
+### Directions, speech and shared settings
+
+**Turn-by-turn directions** are worked out once, in the helper (`realroutes/nav.py`): the car's position is matched to the planned route four times a second, and the next real turn (road bends and name changes are left out) goes to every screen as `nav`: the tablet and PC console draw a turn card like the phone's (arrow, distance, what to do, and the turn after when it is close), and the Android Auto app uses the same rules. Spoken prompts come once well ahead of a turn and once at it ("In 300 metres, bear right onto Albert Street", "Turn left onto Kent Street"), turns close together are said as one sentence, and never the same words twice in a row.
+
+**Speech** goes to one place, chosen under **Speak on** (the speaker button on the console, or BeamDeck's Bus tab): **BeamDeck** (Piper on the PC; the window plays the clip through the car's sound, muffled outside the car, with the music dipping under it), **the phone** (Android's voice as navigation guidance, so Android Auto plays it in the car) or **the tablet** (its browser voice). Automatic picks them in that order. Speech has its own volume, separate from the music, and each rider has their own voice.
+
+**Shared settings** (Bus / Rides / Freight mode, map view and style, speech) are kept by the helper (`prefs.json`, `api/prefs`), so the tablet, a PC browser and BeamDeck's window always match. **Colours** follow each device's Material You palette: the phone app sends its wallpaper colour, and `realroutes/tools/tablet_colours.sh` reads the tablet's over adb (Chrome on Android does not give pages the system colour).
+
+BeamDeck's **Bus tab** has a Real Routes card: **Open Real Routes** (the console in its own window) and the speech settings.
+
+### Trucking (Freight)
+
+A job board in the style of Euro Truck Simulator (`realroutes/freight.py`, `freight_data.py`): pick any installed truck in the **Garage** (stock or mod; the trailer is matched to its hitch), take a job, drive to the pickup, load (the truck's own load parts at the right weight: pipes, wood, a marble block, boxes, rocks, tanker loads), and deliver to one or more drop-offs on the clock. Pay depends on the distance, the cargo, the time and the cargo's condition; speeding fines, cargo damage and late delivery each count separately and can be switched off. The **truck panel** has the map, directions, live stats, the retarder and engine brake (read from the truck's own controllers), cruise control, the differential locks and a PTO button (tap for high or low engine speed, hold for a slider).
+
+**Where the jobs are:**
+
+* **On BeamNG.Earth:** 118 real towns, the Ottawa to Toronto corridor first, with real businesses as pickups and drop-offs.
+* **On regular maps (stock and mod maps):** the map's own places, best source first. BeamNG's own delivery businesses (the career's warehouses, shops, fuel stations and trailer yards; West Coast USA has them, and mod maps can include them), the big map's points of interest, the map's named spawn points, and finally spots spread over its road network, so any map with AI roads works. Distances and clocks are the map's own, and every map gets **challenge jobs** from its real heights: the biggest climb, a steep descent and the longest haul across the map, heavy and better paid.
+
+**Multiplayer:** a small hub on the server (`relay/freight-hub.py`, port 47141) shares a job board between friends, with convoys (a 4-letter code, more pay per extra driver), a list of drivers online with a **Route** button, radio chat and **supply chains** (a delivery leaves the next job at the drop-off for anyone to take). Jobs on a regular map are only shared with players on the same map.
+
+### Head tracking
+
+A webcam turns the view in any vehicle and any mode. The person icon in the console's bottom bar opens it: pick the camera, **Start tracking**, sit as you drive and **Recenter** (or **Alt+C** at any time). The face is found in the page itself (MediaPipe's face model on the graphics chip; nothing leaves the computer), `realroutes/headfilter.js` turns the head's pose into a smooth view (presets from gentle to wide), and the page sends the result through `api/head` to the game. Open it on the PC with the webcam.
+
+### CareerMP: jobs that pay into a multiplayer career
+
+With [our CareerMP for BeamNG 0.40.6](https://github.com/Eagle10021/CareerMP-0.40) on the BeamMP server, the career server keeps **one clock and one sky for everyone** (one in-game hour is 10 real minutes, weather changes every few hours) and pays a **payday every in-game hour**. A player picks a main job (trucker, bus driver, ride-share driver or driver) and optionally a second one at half its wage, in the game's **CareerMP Jobs** app or with the console's **Jobs** button. A payslip is each job's hourly wage for the part of the hour spent driving, plus what the job earned: trucking loads, ride fares and tips, and **bus fares** (every boarding passenger pays, $3.85 or $2.95 for students and seniors, and a few ride without paying). Real Routes sends those earnings to the game (`careerEarn`); outside a CareerMP career they only count in Real Routes' own totals.
+
+**In multiplayer, BeamMP ignores local mods** and every player downloads the server's: build the mod for the server with `./make-beammp-zip.sh server:beammp-server/Resources/Client/` after changing `mod/`.
 
 ## 7. Gotchas Found Building It
 
