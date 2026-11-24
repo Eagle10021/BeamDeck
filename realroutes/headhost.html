@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BeamDeck head tracking</title>
+<meta name="color-scheme" content="dark">
+<style>
+  body { margin: 0; padding: 14px 16px; background: #0c0e17; color: #e1e4fc; font: 14px/1.4 system-ui, sans-serif; }
+  h1 { font-size: 16px; margin: 0 0 6px; }
+  .s { color: #a6aac1; } .bad { color: #ffb1c4; }
+  canvas { display: block; margin-top: 10px; border-radius: 10px; background: #000; max-width: 100%; }
+</style>
+</head>
+<body>
+<h1>Head tracking on this computer</h1>
+<div id="st">Waiting for a screen to start it…</div>
+<div class="s">Controlled from Real Routes on the tablet or a browser. This window can sit behind the game or be minimized.</div>
+<canvas id="pv" width="256" height="192"></canvas>
+<script src="headfilter.js"></script>
+<script type="module">
+// The laptop's head tracker, run by BeamDeck in its own browser window (camera allowed, never throttled in the
+// background) and controlled from any screen through the helper: api/headhost/report every half second brings the
+// commands (start with a camera name and the settings, stop, recenter, settings) and takes this window's status, the
+// face markers and a small preview. Poses go to the game exactly as from the page tracker (api/head).
+const HF = window.HeadFilter;
+const $ = id => document.getElementById(id);
+let settings = {sens: HF.mergeSettings(null), res: {size: 640, fps: 30, proc: "GPU", eco: true}};
+let filter = new HF.Filter(settings.sens);
+let run = null, lm = null, lmProc = null, msg = "Waiting for a screen to start it", bad = false;
+let stats = {fps: 0, ms: 0, frames: 0, t0: 0, face: false, lastFace: 0, sent: 0, err: 0};
+let last = {raw: null, out: null, rel: null, lm: null};
+let cameras = [];
+const say = (t, b) => { msg = t; bad = !!b; $("st").textContent = t; $("st").className = b ? "bad" : ""; };
+
+let inFlight = false, pending = null;
+function send(out) {
+  pending = out;
+  if (inFlight) return;
+  inFlight = true;
+  const body = JSON.stringify({...pending, on: true}); pending = null;
+  fetch("api/head", {method: "POST", headers: {"Content-Type": "application/json"}, body}).then(r => { if (r.ok) stats.sent++; else stats.err++; })
+    .catch(() => { stats.err++; }).finally(() => { inFlight = false; if (pending) send(pending); });
+}
+
+async function listCameras() {
+  let devs = await navigator.mediaDevices.enumerateDevices();
+  if (devs.some(d => d.kind === "videoinput" && !d.label)) {
+    try { (await navigator.mediaDevices.getUserMedia({video: true})).getTracks().forEach(t => t.stop()); devs = await navigator.mediaDevices.enumerateDevices(); } catch {}
+  }
+  const cams = devs.filter(d => d.kind === "videoinput");
+  cameras = cams.map(d => d.label).filter(Boolean);
+  return cams;
+}
+
+async function ensureModel() {
+  const proc = settings.res.proc || "GPU";
+  if (lm && lmProc === proc) return lm;
+  if (lm) { try { lm.close(); } catch {} lm = null; }
+  say("Loading the face model…");
+  const base = new URL("head/asset/", location.href).href;
+  const mod = await import(base + "vision_bundle.mjs");
+  const files = await mod.FilesetResolver.forVisionTasks(base.replace(/\/$/, ""));
+  const make = p => mod.FaceLandmarker.createFromOptions(files, {
+    baseOptions: {modelAssetPath: base + "face_landmarker.task", delegate: p},
+    runningMode: "VIDEO", numFaces: 1, outputFacialTransformationMatrixes: true, outputFaceBlendshapes: false,
+    minFaceDetectionConfidence: 0.5, minFacePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
+  });
+  try { lm = await make(proc); lmProc = proc; }
+  catch (e) { if (proc !== "GPU") throw e; lm = await make("CPU"); lmProc = "CPU"; }
+  return lm;
+}
+
+// the camera by name: the screen offers the names this computer reports, which the browser's labels contain
+function pickCamera(cams, name) {
+  if (!name) return cams[0];
+  const key = String(name).split(":")[0].trim().toLowerCase();
+  return cams.find(d => d.label.toLowerCase().includes(key)) || cams[0];
+}
+
+async function start(camName) {
+  if (run) stop(true);
+  try {
+    const cams = await listCameras();
+    if (!cams.length) { say("This computer has no camera.", true); return; }
+    const cam = pickCamera(cams, camName);
+    const size = settings.res.size || 640, fps = settings.res.fps || 30;
+    say("Starting " + (cam.label || "the camera") + "…");
+    const stream = await navigator.mediaDevices.getUserMedia({video: {deviceId: {exact: cam.deviceId}, width: {ideal: size},
+      height: {ideal: Math.round(size * 3 / 4)}, frameRate: {ideal: fps, max: fps}}});
+    const model = await ensureModel();
+    const track = stream.getVideoTracks()[0];
+    // frames straight from the camera track (ImageCapture): works while the window is covered or minimized,
+    // where a <video> element would stop being drawn
+    const cap = new ImageCapture(track);
+    filter = new HF.Filter(settings.sens);
+    stats = {fps: 0, ms: 0, frames: 0, t0: performance.now(), face: false, lastFace: 0, sent: 0, err: 0};
+    run = {stream, cap, label: cam.label, stop: false, still: 0, prev: null, bmp: null};
+    track.addEventListener("ended", () => stop(false, "The camera stopped."));
+    say("Looking for a face… sit as you do when you drive.");
+    loop(model);
+  } catch (e) {
+    say("Could not start: " + (e.message || e.name), true);
+    if (run) stop(true);
+  }
+}
+
+function stop(quiet, why) {
+  if (run) { run.stop = true; run.stream.getTracks().forEach(t => t.stop()); if (run.bmp) run.bmp.close(); }
+  run = null;
+  fetch("api/head", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({on: true})}).catch(() => {});
+  if (!quiet) say(why || "Tracking is off.");
+}
+
+async function loop(model) {
+  let lastT = 0;
+  while (run && !run.stop) {
+    const fps = settings.res.eco !== false && run.still > 45 ? 10 : (settings.res.fps || 30);
+    const wait = Math.max(0, 1000 / fps - (performance.now() - lastT));
+    await new Promise(r => setTimeout(r, wait));
+    if (!run || run.stop) break;
+    lastT = performance.now();
+    let bmp;
+    try { bmp = await run.cap.grabFrame(); } catch { continue; }
+    const t0 = performance.now();
+    let res;
+    try { res = model.detectForVideo(bmp, t0); } catch (e) { bmp.close(); say("The face model stopped: " + (e.message || e), true); stop(true); break; }
+    stats.ms += (performance.now() - t0 - stats.ms) * 0.1; stats.frames++;
+    if (run.bmp) run.bmp.close();
+    run.bmp = bmp;                                        // kept for the preview
+    const m = res && res.facialTransformationMatrixes && res.facialTransformationMatrixes[0];
+    if (m) {
+      if (!stats.face) say("Tracking " + (run.label || ""));
+      stats.face = true; stats.lastFace = t0;
+      const raw = HF.poseFromMatrix(m.data);
+      last.raw = raw; last.lm = res.faceLandmarks && res.faceLandmarks[0];
+      const r = filter.update(raw, t0 / 1000);
+      if (r) {
+        last.out = r.out; last.rel = r.rel;
+        send(r.out);
+        const p = run.prev, mv = p ? Math.abs(r.rel.yaw - p.yaw) + Math.abs(r.rel.pitch - p.pitch) + Math.abs(r.rel.x - p.x) + Math.abs(r.rel.y - p.y) : 9;
+        run.still = mv < 0.6 ? run.still + 1 : 0; run.prev = r.rel;
+      }
+    } else if (stats.face && t0 - stats.lastFace > 300) {
+      stats.face = false; filter.lost(); last.out = null; last.lm = null; run.still = 0;
+      say("No face in the picture.");
+    }
+  }
+}
+
+// a small picture with the face markers, for the screen that controls this (and this window)
+function preview() {
+  const c = $("pv"), g = c.getContext("2d");
+  if (!run || !run.bmp) { g.clearRect(0, 0, c.width, c.height); return null; }
+  const b = run.bmp;
+  c.height = Math.round(c.width * b.height / b.width);
+  g.save(); g.translate(c.width, 0); g.scale(-1, 1);       // a mirror, as on the page tracker
+  g.drawImage(b, 0, 0, c.width, c.height);
+  g.fillStyle = "#f2b134";
+  if (last.lm) for (const i of [1, 33, 263, 61, 291, 199]) { const p = last.lm[i]; if (p) { g.beginPath(); g.arc(p.x * c.width, p.y * c.height, 3, 0, 7); g.fill(); } }
+  g.restore();
+  try { return c.toDataURL("image/jpeg", 0.55); } catch { return null; }
+}
+
+async function report() {
+  const now = performance.now();
+  const secs = Math.max(0.5, (now - (stats.t0 || now)) / 1000);
+  const status = {running: !!run, camera: run && run.label, message: msg, bad, cameras,
+    fps: run ? Math.round(stats.frames / secs) : 0, ms: Math.round(stats.ms), face: stats.face, sent: stats.sent, err: stats.err,
+    raw: last.raw, out: last.out, rel: last.rel, preview: preview()};
+  if (run && secs > 4) { stats.frames = 0; stats.t0 = now; }
+  try {
+    const r = await (await fetch("api/headhost/report", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({status})})).json();
+    if (r.settings && r.settings.sens) { settings = {sens: HF.mergeSettings(r.settings.sens), res: {...settings.res, ...(r.settings.res || {})}}; filter.setSettings(settings.sens); }
+    for (const c of r.cmds || []) {
+      if (c.action === "start") await start(c.camera);
+      else if (c.action === "stop") stop(false);
+      else if (c.action === "recenter" && run && last.raw) { filter.recenter(last.raw); say("Centred on where you are now."); }
+    }
+  } catch {}
+}
+listCameras().catch(() => {});
+setInterval(report, 500);
+report();
+</script>
+</body>
+</html>

@@ -350,9 +350,15 @@ body.fdriving .modes { display: none; }
 .fheadcol { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
 .fheadcol h2 { margin: 2px 0 0; font-size: 20px; font-weight: 800; } .fheadcol h3 { margin: 8px 0 0; font-size: 16px; }
 .fheadcol select { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 15px; }
-.hprev { position: relative; border-radius: 10px; overflow: hidden; background: #000; aspect-ratio: 4 / 3; max-height: 300px; align-self: stretch; display: grid; place-items: center; }
+/* the box takes the camera's own shape (set from the video by head.js), so the picture is never cropped and the face
+   markers drawn over it line up with the face */
+.hprev { position: relative; border-radius: 10px; overflow: hidden; background: #000; aspect-ratio: var(--cam-ar, 4 / 3);
+  height: 300px; max-width: 100%; justify-self: center; align-self: start; }
 .hprev.off { display: none; }
-.hprev video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }           /* a mirror, so left is left */
+.hprev.remote video, .hprev.remote canvas { display: none; }
+.hprev img#hRemote { display: none; width: 100%; height: 100%; object-fit: contain; }
+.hprev.remote img#hRemote { display: block; }
+.hprev video { display: block; width: 100%; height: 100%; object-fit: contain; transform: scaleX(-1); }   /* a mirror, so left is left */
 .hprev canvas { position: absolute; inset: 0; width: 100%; height: 100%; transform: scaleX(-1); pointer-events: none; }
 .hstatus { font-size: 15px; color: var(--muted); } .hstatus.bad { color: var(--brake, #ff7a6b); }
 .hres { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; font-size: 14px; color: var(--muted); }

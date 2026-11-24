@@ -566,6 +566,8 @@ class Helper:
         # speech: BeamDeck sets on_say (Piper on the PC, played by its window through the car's sound) and
         # pc_voice (whether that works right now); the Android Auto app counts as present while it polls
         self.on_say = None
+        self.open_head_host = None                          # set by BeamDeck: opens / closes the laptop's tracker window
+        self.close_head_host = None
         self.pc_voice = lambda: False
         self.aa_seen = 0
         os.makedirs(data_root, exist_ok=True)
@@ -1041,6 +1043,66 @@ class Helper:
             return {"ok": False}
         return {"ok": True}
 
+    # ---- head tracking on this computer, for any screen: the tracker runs in a window BeamDeck opens here (headhost.html,
+    # with this computer's camera); the tablet or a browser sends it commands through the helper and sees its status
+    # and a small preview. open_head_host / close_head_host are set by BeamDeck's server.
+    def headhost_cams(self):
+        """This computer's cameras by name (Linux: from the kernel), so a screen can offer them before the tracker runs."""
+        names = []
+        base = "/sys/class/video4linux"
+        try:
+            for d in sorted(os.listdir(base)):
+                try:
+                    n = open(os.path.join(base, d, "name")).read().strip()
+                    idx = int(open(os.path.join(base, d, "index")).read().strip() or 0)
+                except (OSError, ValueError):
+                    continue
+                if idx == 0 and n and n not in names:          # index 0: the picture (the others are metadata nodes)
+                    names.append(n)
+        except OSError:
+            pass
+        st = getattr(self, "_hh", {}).get("status") or {}
+        for c in st.get("cameras") or []:                       # what the running tracker found (Windows too)
+            if c not in names:
+                names.append(c)
+        return names
+
+    def headhost_view(self):
+        hh = getattr(self, "_hh", None) or {}
+        online = time.time() - hh.get("seen", 0) < 4
+        return {"online": online, "status": hh.get("status") if online else None, "cameras": self.headhost_cams(),
+                "settings": hh.get("settings"), "starting": time.time() - hh.get("launched", 0) < 25 and not online}
+
+    def headhost_cmd(self, body):
+        """A screen's command for the laptop's tracker: start (camera, settings), stop, recenter, settings."""
+        hh = self.__dict__.setdefault("_hh", {"seen": 0, "cmds": [], "status": None, "settings": None, "launched": 0})
+        act = body.get("action")
+        if act not in ("start", "stop", "recenter", "settings"):
+            return {"ok": False, "error": "unknown action"}
+        if body.get("settings") is not None:
+            hh["settings"] = body["settings"]
+        hh["cmds"] = (hh["cmds"] + [{"action": act, "camera": body.get("camera"), "settings": body.get("settings")}])[-10:]
+        online = time.time() - hh["seen"] < 4
+        if act == "start" and not online and getattr(self, "open_head_host", None):
+            if time.time() - hh["launched"] > 25:
+                hh["launched"] = time.time()
+                try:
+                    self.open_head_host()
+                except Exception as e:
+                    return {"ok": False, "error": f"Could not open the tracker on this computer: {e}"}
+        if act == "stop" and getattr(self, "close_head_host", None):
+            threading.Timer(2.0, self.close_head_host).start()       # after it has passed on the stop (the view eases back)
+        return {"ok": True, "online": online}
+
+    def headhost_report(self, body):
+        """The laptop tracker's status (every half second); answered with the commands waiting for it."""
+        hh = self.__dict__.setdefault("_hh", {"seen": 0, "cmds": [], "status": None, "settings": None, "launched": 0})
+        hh["seen"] = time.time()
+        if isinstance(body.get("status"), dict):
+            hh["status"] = body["status"]
+        cmds, hh["cmds"] = hh["cmds"], []
+        return {"cmds": cmds, "settings": hh.get("settings")}
+
     def head_probe(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(0.5)
@@ -1072,6 +1134,14 @@ class Helper:
             return js(self.head_send(body))
         if method == "GET" and path.startswith("/head/asset/"):
             return self.head_asset(os.path.basename(path))
+        if method == "GET" and path == "/api/headhost":                     # the laptop tracker: online, status, preview, cameras
+            return js(self.headhost_view())
+        if method == "POST" and path == "/api/headhost":                    # a command for it, from any screen
+            return js(self.headhost_cmd(body))
+        if method == "POST" and path == "/api/headhost/report":             # the tracker itself, every half second
+            return js(self.headhost_report(body))
+        if method == "GET" and path == "/headhost.html":
+            return 200, open(os.path.join(HERE, "headhost.html"), "rb").read(), "text/html; charset=utf-8"
         if method == "GET" and path == "/api/head/probe":                  # what the game's camera is doing (the tracker page's status, and the tests)
             return js(self.head_probe())
         if method == "GET" and path == "/api/vehicle/preview":            # a truck's picture for the Garage

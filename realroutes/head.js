@@ -21,7 +21,17 @@
   }
   let st = load();
   let saveT = 0;
-  const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch {} }, 300); };
+  const save = () => { clearTimeout(saveT); saveT = setTimeout(() => {
+    try { localStorage.setItem(KEY, JSON.stringify(st)); } catch {}
+    if (run && run.remote) hostCmd("settings");
+  }, 300); };
+  // ---------------------------------------------------------------- the computer's camera, from this screen
+  // A camera picked under "This computer" is read by the tracker BeamDeck runs on the computer (headhost.html); this
+  // page sends it start / stop / recenter / settings and shows its status and preview.
+  const ON_PC = ["127.0.0.1", "localhost"].includes(location.hostname);
+  const isHost = dev => String(dev || "").startsWith("pc:");
+  const hostCmd = (action, extra) => fetch("api/headhost", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({action, settings: {sens: st.sens, res: st.res}, ...(extra || {})})}).then(r => r.json()).catch(() => ({ok: false}));
 
   const filter = new HF.Filter(st.sens);
   let run = null;                 // the running tracker: {stream, lm, stop}
@@ -52,8 +62,14 @@
     }
     const cams = devs.filter(d => d.kind === "videoinput");
     const sel = $("hCam"), cur = st.res.device;
-    sel.innerHTML = cams.length ? cams.map((d, i) => `<option value="${d.deviceId}">${(d.label || "Camera " + (i + 1)).replace(/[<&>]/g, "")}</option>`).join("") : `<option value="">No camera found</option>`;
-    if (cams.some(d => d.deviceId === cur)) sel.value = cur; else st.res.device = sel.value;
+    const esc = t => String(t).replace(/[<&>"]/g, "");
+    let host = [];
+    if (!ON_PC) { try { host = (await (await fetch("api/headhost", {cache: "no-store"})).json()).cameras || []; } catch {} }
+    const local = cams.map((d, i) => `<option value="${d.deviceId}">${esc(d.label || "Camera " + (i + 1))}</option>`).join("");
+    sel.innerHTML = (host.length ? `<optgroup label="This device">${local || `<option value="" disabled>No camera here</option>`}</optgroup>` +
+      `<optgroup label="This computer (BeamDeck)">${host.map(n => `<option value="pc:${esc(n)}">${esc(n.split(":")[0])} (on the computer)</option>`).join("")}</optgroup>`
+      : local || `<option value="">No camera found</option>`);
+    if ([...sel.options].some(o => o.value === cur && !o.disabled)) sel.value = cur; else st.res.device = sel.value;
     return cams;
   }
 
@@ -77,8 +93,34 @@
     return lm;
   }
 
+  async function startRemote() {
+    const btn = $("hStart");
+    const r = await hostCmd("start", {camera: st.res.device.slice(3)});
+    if (!r.ok) { say(r.error || "BeamDeck on the computer does not answer.", true); return; }
+    run = {remote: true, stop: false, still: 0};
+    stats = {fps: 0, ms: 0, frames: 0, t0: performance.now(), face: false, lastFace: 0, sent: 0, err: 0};
+    btn.textContent = "Stop tracking"; document.body.classList.add("headon"); paintHud();
+    say(r.online ? "Starting the computer's camera…" : "Opening the tracker on the computer (a small window there)…");
+    let img = $("hRemote");
+    if (!img) { img = document.createElement("img"); img.id = "hRemote"; img.alt = "The computer's camera"; $("hPrev").appendChild(img); }
+    $("hPrev").classList.add("remote");
+    run.poll = setInterval(async () => {
+      if (!run || !run.remote) return;
+      let v;
+      try { v = await (await fetch("api/headhost", {cache: "no-store"})).json(); } catch { return; }
+      const s = v.status;
+      if (!s) { if (!v.starting) say("The tracker on the computer is not answering. Is BeamDeck running there?", true); return; }
+      stats.fps = s.fps; stats.ms = s.ms; stats.face = s.face; stats.err = s.err;
+      last.raw = s.raw; last.out = s.out; last.rel = s.rel;
+      if (s.preview && st.res.show) img.src = s.preview;
+      if (!s.running || !s.face) say(s.message || "Waiting for the computer's camera…", !!s.bad);
+      else if ($("hStatus").classList.contains("bad")) say("Tracking");
+    }, 500);
+  }
+
   async function start() {
     if (run) return;
+    if (isHost(st.res.device)) return startRemote();
     const btn = $("hStart"); btn.disabled = true;
     try {
       const size = st.res.size, fps = st.res.fps;
@@ -104,6 +146,13 @@
   }
 
   function stop(msg) {
+    if (run && run.remote) {
+      clearInterval(run.poll); hostCmd("stop");
+      run = null; $("hPrev").classList.remove("remote");
+      const btn = $("hStart"); if (btn) btn.textContent = "Start tracking";
+      document.body.classList.remove("headon"); say(msg || "Tracking is off."); paintHud();
+      return;
+    }
     if (run) { run.stop = true; run.stream.getTracks().forEach(t => t.stop()); }
     run = null;
     const v = $("hVideo"); if (v) v.srcObject = null;
@@ -232,14 +281,14 @@
     if (!page || !page.classList.contains("on")) return;
     const now = performance.now();
     if (now - lastShown < 120) return; lastShown = now;
-    if (run && now - stats.t0 > 1000) { stats.fps = Math.round(stats.frames * 1000 / (now - stats.t0)); stats.frames = 0; stats.t0 = now; }
+    if (run && !run.remote && now - stats.t0 > 1000) { stats.fps = Math.round(stats.frames * 1000 / (now - stats.t0)); stats.frames = 0; stats.t0 = now; }
     const rows = [["Turn", "yaw", 60, 120], ["Up and down", "pitch", 40, 60], ["Tilt", "roll", 30, 45]];
     $("hLive").innerHTML = rows.map(([l, a, hl, ol]) => {
       const rel = last.rel && last.rel[a] || 0, out = last.out && last.out[a] || 0;
       return `<div class="hrow"><span>${l}</span><div class="hbar"><b></b>${bar(rel, hl)}</div><em>head ${rel.toFixed(0)}°</em><div class="hbar view"><b></b>${bar(out, ol)}</div><em>view ${out.toFixed(0)}°</em></div>`;
     }).join("");
     if (run) {
-      const msg = stats.face ? `Tracking: ${stats.fps} frames a second, ${stats.ms.toFixed(0)} ms each${st.res.eco && run.still > 45 ? " (resting while you are still)" : ""}${stats.err ? ", " + stats.err + " failed sends" : ""}`
+      const msg = stats.face ? `Tracking${run.remote ? " on the computer" : ""}: ${stats.fps} frames a second, ${stats.ms.toFixed(0)} ms each${st.res.eco && run.still > 45 ? " (resting while you are still)" : ""}${stats.err ? ", " + stats.err + " failed sends" : ""}`
                              : "No face in view: sit where the camera can see you";
       if (!$("hStatus").classList.contains("bad")) say(msg);
     }
@@ -259,10 +308,16 @@
     const c = $("hCanvas"), v = $("hVideo");
     if (!c || !run || !st.res.show || !last.lm) return;
     const page = $("head"); if (!page || !page.classList.contains("on")) return;
-    const w = c.width = v.videoWidth || 320, h = c.height = v.videoHeight || 240;
-    const g = c.getContext("2d"); g.clearRect(0, 0, w, h);
+    if (run.remote) return;                       // the computer's preview comes with its markers drawn in
+    const box = $("hPrev");
+    const vw = v.videoWidth || 320, vh = v.videoHeight || 240;
+    if (box && v.videoWidth && box.dataset.ar !== `${vw}/${vh}`) { box.dataset.ar = `${vw}/${vh}`; box.style.setProperty("--cam-ar", `${vw} / ${vh}`); }
+    // the canvas is the box's own size, and each point goes where object-fit: contain put that pixel of the video
+    const bw = c.width = c.clientWidth || vw, bh = c.height = c.clientHeight || vh;
+    const k = Math.min(bw / vw, bh / vh), ox = (bw - vw * k) / 2, oy = (bh - vh * k) / 2;
+    const g = c.getContext("2d"); g.clearRect(0, 0, bw, bh);
     g.fillStyle = "#f2b134";
-    for (const i of [1, 33, 263, 61, 291, 199]) { const p = last.lm[i]; if (p) { g.beginPath(); g.arc(p.x * w, p.y * h, 2.5, 0, 7); g.fill(); } }
+    for (const i of [1, 33, 263, 61, 291, 199]) { const p = last.lm[i]; if (p) { g.beginPath(); g.arc(ox + p.x * vw * k, oy + p.y * vh * k, 3, 0, 7); g.fill(); } }
   }
 
   // ---------------------------------------------------------------- the game's side
@@ -297,6 +352,7 @@
   };
   function recenter() {
     if (!run) return;
+    if (run.remote) { hostCmd("recenter"); say("Centred on where you are now."); return; }
     if (filter.recenter(last.raw)) { say("Centred on where you are now."); setTimeout(() => { if (run) say("Tracking"); }, 1500); }
   }
   window.headTracker = {start, stop, recenter, isRunning: () => !!run, state: () => ({stats, last, sens: st.sens, res: st.res}), set: (path, v) => { setPath(st.sens, path, v); filter.setSettings(st.sens); paintSettings(); }};

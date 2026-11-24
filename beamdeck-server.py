@@ -2079,6 +2079,8 @@ def routes_start():
         ROUTES.rides.on_people = routes_standees     # new or changed riders' pictures: into the game straight away
         ROUTES.on_say = routes_say                   # announcements spoken here, through the car's sound
         ROUTES.pc_voice = lambda: tts_available() and bool(windows)
+        ROUTES.open_head_host = open_head_host       # head tracking with this computer's camera, from any screen
+        ROUTES.close_head_host = close_head_host
         routes_standees()                            # (the helper has just written the built-in people's cards)
     except Exception as e:
         print("Real Routes is off:", e, flush=True)
@@ -2178,6 +2180,39 @@ def routes_say(item):
         p.stdin.flush()
     except OSError as e:
         print("Real Routes speech failed:", e, flush=True)
+
+
+HEAD_HOST = {"proc": None}
+
+
+def open_head_host():
+    """The laptop's head tracker (realroutes/headhost.html), asked for from any screen: a small window in a browser
+    profile of its own, so its flags apply: the camera is allowed without a prompt, and nothing is slowed down while the
+    window is covered by the game or minimized."""
+    p = HEAD_HOST["proc"]
+    if p and p.poll() is None:
+        return True
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("bd_launch", os.path.join(HERE, "beamdeck-launch.py"))
+    launch = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launch)
+    browser = launch.find_browser()
+    if not browser:
+        raise RuntimeError("no Chromium-based browser found")
+    HEAD_HOST["proc"] = subprocess.Popen(
+        [browser, f"--app=http://127.0.0.1:{PORT}/routes/headhost.html", "--user-data-dir=" + os.path.join(DATA_DIR, "headhost-profile"),
+         "--window-size=320,420", "--no-first-run", "--no-default-browser-check", "--use-fake-ui-for-media-stream",
+         "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--disable-background-timer-throttling"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        **({"creationflags": 0x08000000} if WINDOWS else {"start_new_session": True}))
+    return True
+
+
+def close_head_host():
+    p = HEAD_HOST["proc"]
+    if p and p.poll() is None:
+        p.terminate()
+    HEAD_HOST["proc"] = None
 
 
 def open_routes_window():
