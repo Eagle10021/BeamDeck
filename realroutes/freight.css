@@ -1,4 +1,5 @@
 /* ---------- Freight: job board, garage, planner, history, and the driving cockpit ---------- */
+@import url("https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800&display=swap");
 #freight { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
 #freight .fbar { display: flex; align-items: center; gap: 18px; padding: 10px 18px; padding-right: 350px; }
 #freight .fbar h1 { font-size: 26px; }
@@ -79,7 +80,7 @@
 .g b { display: block; font-size: 19px; line-height: 1.15; white-space: nowrap; } .g span { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
 .g i { position: absolute; left: 0; bottom: 0; height: 4px; width: 0; background: var(--md-primary); transition: width .4s; }
 .g.warn b { color: var(--late); } .g.hot b { color: var(--bad); } .g.hot { outline: 1px solid var(--bad); }
-.g.wide { grid-column: span 2; } .g.speed b { font-size: 27px; }
+.g.wide { grid-column: span 2; } .g.xwide { grid-column: span 4; }
 .g small { font-size: 11px; color: var(--muted); font-weight: 400; }
 .panel { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
 .panel h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
@@ -145,3 +146,247 @@ body.fdriving .modes { display: none; }
 .jt.compact { gap: 10px; } .jt.compact .ji { font-size: 22px; } .jt.compact .jtoggle { width: 40px; height: 40px; }
 .jmini { flex: 1; min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .jmini b { font-size: 16px; }
 .jmini .late { color: var(--late); } .jmini .bad { color: var(--bad); }
+
+/* multiplayer */
+.fmp { display: grid; grid-template-columns: 1fr 1fr 1.15fr; gap: 12px; flex: 1; min-height: 0; }
+.fmpc { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.fmpgrow { flex: 1; }
+.fmpcol { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: hidden; }
+.fmpcol h2 { margin: 4px 0 0; font-size: 18px; }
+.fmpl { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.fmpl input, .fmprow input { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 12px; padding: 9px 12px; font: inherit; font-size: 16px; }
+.fmprow { display: flex; gap: 8px; align-items: center; }
+.fmprow button { padding: 9px 16px; font-size: 15px; }
+.frow { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.frow:last-child { border-bottom: 0; }
+.frow .grow { flex: 1; min-width: 0; }
+.frow b, .frow small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frow small { color: var(--muted); font-size: 13px; }
+.fbar2 { height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; margin-top: 4px; }
+.fbar2 i { display: block; height: 100%; background: var(--accent, #4fd18b); }
+.fmsg { padding: 3px 2px; font-size: 15px; word-break: break-word; }
+.fmsg.sys { color: var(--muted); font-size: 14px; }
+.fmsg b { color: var(--accent, #4fd18b); margin-right: 6px; }
+.fmsg.cv b::after { content: " (convoy)"; font-weight: 400; color: var(--muted); font-size: 12px; }
+.fcode { font-size: 34px; font-weight: 800; letter-spacing: 6px; }
+#fConvoyBox { position: absolute; left: 10px; bottom: 112px; z-index: 5; max-width: 46%; display: none; pointer-events: none;
+  background: color-mix(in srgb, var(--panel, #1c1b1f) 82%, transparent); border: 1px solid var(--line); border-radius: 14px; padding: 8px 12px; font-size: 14px; backdrop-filter: blur(6px); }
+#fConvoyBox.on { display: block; }
+#fConvoyBox b { letter-spacing: 3px; }
+#fConvoyBox .m { display: flex; gap: 8px; align-items: center; }
+#fConvoyBox .m span:last-child { margin-left: auto; color: var(--muted); }
+@media (max-width: 1100px) { .fmp { grid-template-columns: 1fr 1fr; overflow-y: auto; } .fmpc:last-child { grid-column: 1 / -1; } .fmpcol { min-height: 260px; } }
+@media (max-width: 700px) { .fmp { grid-template-columns: 1fr; } }
+
+/* ================= Freight look =================
+   A dispatch office on Highway 401: Overpass (the road-sign face), sign green for "this fits", dashboard amber for money and
+   the active tab, squarer corners, and a job drawn as a ticket with a perforated tear-off stub. The device colours
+   (--md-*) still drive surfaces and the main action, so Material You theming keeps working. */
+#freight {
+  --sign: #0a6b45; --on-sign: #eafff5; --sign-line: #3fae80;
+  --amber: #f2b134; --brake: #ff7a6b;
+  font-family: "Overpass", "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+#freight button, #freight input, #freight select { font-family: inherit; }
+
+/* the top bar: no card, text tabs underlined in amber */
+#freight .fbar { background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding-left: 4px; padding-bottom: 6px; gap: 26px; }
+#freight .fbar h1 { font-size: 30px; font-weight: 800; letter-spacing: -.01em; }
+#freight .ftabs { width: auto; background: none; padding: 0; gap: 4px; }
+#freight .ftabs button { flex: none; padding: 9px 16px; border-radius: 8px; background: none; color: var(--muted); font-size: 17px; font-weight: 700; }
+#freight .ftabs button.on { background: none; color: var(--text); }
+/* the springy tab indicator (M3 Expressive) stays, as a quiet pill behind the active tab */
+#freight .ftabs .m3-ind { border-radius: 8px; background: color-mix(in srgb, var(--md-on-surface) 11%, transparent); box-shadow: none; }
+#freight .fkpi b { font-size: 26px; font-weight: 800; }
+#freight .fkpi:first-of-type b, #freight #fBal { color: var(--amber); }
+#freight .fkpi span { text-transform: none; letter-spacing: 0; font-size: 13px; }
+#freight .fchip { border-radius: 10px; border: 1px solid var(--line); background: var(--panel); }
+
+/* filters are plain text tabs; the rules are check boxes */
+#freight .ftools { gap: 14px 18px; }
+#freight .ftools select, #freight .fform select, #freight .fgarage input, #freight .fform input, .fmpl input, .fmprow input { border-radius: 8px; }
+#freight .fchips { gap: 4px 6px; }
+#freight .fchips button { background: none; border-radius: 8px; padding: 6px 12px; font-size: 16px; font-weight: 600; color: var(--muted); }
+#freight .fchips button.on { background: color-mix(in srgb, var(--md-on-surface) 11%, transparent); color: var(--text); }
+#freight #fRules { align-items: center; gap: 4px 10px; }
+#freight #fRules::before { content: "Enforce"; color: var(--muted); font-size: 15px; margin-right: -2px; }
+#freight #fRules button, #freight #fRules button.on { display: inline-flex; align-items: center; background: none; padding: 6px 4px; font-size: 15px; color: var(--text); }
+#freight #fRules button::before { content: ""; width: 15px; height: 15px; margin-right: 7px; border: 2px solid var(--dim); border-radius: 3px; box-sizing: border-box; }
+#freight #fRules button.on::before { background: var(--amber); border-color: var(--amber); box-shadow: inset 0 0 0 2px var(--panel); }
+#freight .toggle { border-radius: 10px; }
+#freight .toggle button { border-radius: 7px; }
+
+/* small tags and actions */
+#freight .cap { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 4px; padding: 2px 8px; font-size: 13px; font-weight: 700; }
+#freight .cap.on { border-color: var(--amber); color: var(--amber); background: none; }
+#freight .cap.fit { border-color: var(--sign-line); color: var(--sign-line); background: none; }
+#freight .cap.warn { border-color: var(--amber); color: var(--amber); background: none; }
+#freight .cap.hot { border-color: var(--brake); color: var(--brake); background: none; }
+#freight button.cap { cursor: pointer; background: var(--panel2); border-color: var(--line); color: var(--text); border-radius: 8px; padding: 8px 14px; font-size: 15px; }
+#freight button.cap:hover { border-color: var(--amber); }
+#freight .fneed .cap.swap { color: var(--text); }
+
+/* ---- the job ticket ---- */
+#freight .fgrid { grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 14px; }
+#freight .offer.ticket { display: grid; grid-template-columns: 1fr auto; gap: 0; padding: 0; border-radius: 10px; background: var(--panel2); border: 1px solid var(--line); overflow: hidden; }
+#freight .offer.scen { background: var(--panel2); border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); }
+#freight .offer.nofit { opacity: .58; }
+#freight .tmain { padding: 14px 16px 14px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+#freight .thead { display: flex; gap: 12px; align-items: flex-start; }
+#freight .thead .cargo { font-size: 26px; line-height: 1; padding-top: 2px; filter: saturate(.85); }
+#freight .thead .tt { flex: 1; min-width: 0; }
+#freight .ot { font-weight: 800; font-size: 20px; line-height: 1.1; }
+#freight .offer .os { color: var(--muted); font-size: 14px; margin-top: 2px; }
+#freight .shields { display: flex; gap: 5px; flex: none; }
+.shield { display: inline-grid; place-items: center; min-width: 38px; height: 26px; padding: 0 6px; border-radius: 5px 5px 13px 13px; background: var(--sign); color: var(--on-sign);
+  border: 2px solid var(--on-sign); font-weight: 800; font-size: 14px; letter-spacing: .02em; box-shadow: 0 0 0 1.5px var(--sign); }
+/* the route: from, a line (with the stops in between), to */
+.spine { display: flex; align-items: center; gap: 10px; font-size: 16px; min-width: 0; }
+.spine b { font-weight: 700; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; overflow: hidden; text-overflow: ellipsis; }
+.spine b::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--text); flex: none; box-sizing: border-box; }
+.spine b:last-child::before { background: none; border: 2.5px solid var(--text); }
+.spine i { flex: 1; min-width: 22px; height: 0; border-top: 2px dashed var(--dim); }
+.spine em { font-style: normal; color: var(--muted); font-size: 14px; white-space: nowrap; }
+#freight .offer .tags { gap: 6px; }
+#freight .tstub { position: relative; display: flex; flex-direction: column; justify-content: center; align-items: stretch; gap: 8px; padding: 14px 18px 14px 22px; min-width: 150px;
+  background: color-mix(in srgb, var(--md-on-surface) 4%, var(--panel)); border-left: 2px dashed var(--line); }
+/* the perforation: two notches where the stub tears off */
+#freight .tstub::before, #freight .tstub::after { content: ""; position: absolute; left: -9px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg); border: 1px solid var(--line); box-sizing: border-box; }
+#freight .tstub::before { top: -9px; } #freight .tstub::after { bottom: -9px; }
+#freight .tstub .pay { font-size: 32px; font-weight: 800; line-height: 1; color: var(--amber); letter-spacing: -.01em; }
+#freight .tstub .tmeta { display: flex; gap: 12px; color: var(--muted); font-size: 15px; }
+#freight .tstub .tmeta span { white-space: nowrap; }
+#freight .offer button.take { background: var(--md-primary); color: var(--md-on-primary); border-radius: 8px; font-weight: 800; font-size: 16px; padding: 10px 14px; }
+#freight .offer button.take:disabled { background: none; border: 1px dashed var(--dim); color: var(--muted); font-weight: 600; font-size: 13px; line-height: 1.2; }
+#freight .offer .fneed { color: var(--muted); font-size: 14px; }
+@media (max-width: 760px) { #freight .fgrid { grid-template-columns: 1fr; } #freight .offer.ticket { grid-template-columns: 1fr; } #freight .tstub { border-left: 0; border-top: 2px dashed var(--line); flex-direction: row; align-items: center; flex-wrap: wrap; } #freight .tstub::before, #freight .tstub::after { display: none; } }
+
+/* ---- other pages ---- */
+#freight .fform label { text-transform: none; letter-spacing: 0; font-size: 14px; }
+#freight .hist th { text-transform: none; font-size: 14px; letter-spacing: 0; }
+#freight .hist td.n { font-weight: 600; }
+#freight .gcfg { border-radius: 8px; border: 1px solid transparent; }
+#freight .gcfg.sel { outline: 0; border-color: var(--amber); }
+#freight .card { border-radius: 10px; }
+#freight .empty { color: var(--muted); font-size: 17px; }
+
+/* ---- multiplayer ---- */
+.fmpcol h2 { font-weight: 800; font-size: 20px; margin-top: 2px; }
+.plate { align-self: flex-start; position: relative; background: #eef1f5; color: #15233f; font-weight: 800; font-size: 40px; line-height: 1; letter-spacing: 7px; padding: 8px 26px 8px 30px;
+  border-radius: 8px; border: 3px solid #15233f; box-shadow: inset 0 0 0 2px #eef1f5, inset 0 0 0 3px #9fb0c6; text-transform: uppercase; }
+.plate::before, .plate::after { content: ""; position: absolute; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: #9fb0c6; }
+.plate::before { left: 9px; } .plate::after { right: 9px; }
+.sdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--dim); flex: none; }
+.sdot.driving { background: var(--sign-line); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sign-line) 28%, transparent); } .sdot.busy { background: var(--amber); }
+.frow b { font-weight: 700; } .frow .side { text-align: right; flex: none; color: var(--muted); font-size: 14px; }
+.fmsg b { color: var(--amber); }
+.fmsg.sys { font-style: italic; }
+.fbar2 { height: 5px; border-radius: 0; } .fbar2 i { background: var(--amber); }
+#fConvoyBox { border-radius: 10px; }
+
+/* the cockpit's labels in plain sentence case, a size you can read from the driver's seat */
+#freight .jobstrip .jnums span, #freight .g span, #fSummary .rows span { text-transform: none; letter-spacing: 0; font-size: 13px; }
+#freight .g span { font-size: 12px; }
+#freight .panel h4 { text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--text); }
+#freight .jobstrip .jnums > div:last-child b { color: var(--amber); }
+
+/* the speedometer and the convoy share one pill, at the bottom left of the map; it only grows as wide as it needs */
+#freight .ov-speed { border-radius: 999px; padding: 8px 14px 8px 24px; max-width: calc(100% - 300px); overflow: hidden; align-items: center; }
+#freight .ov-speed #fConvoyBox { position: static; display: none; flex: 0 1 auto; align-items: center; gap: 14px; min-width: 0; max-width: none;
+  padding: 0 8px 0 18px; margin-left: 2px; border: 0; border-left: 1px solid var(--line); border-radius: 0; background: none; backdrop-filter: none; box-shadow: none; pointer-events: none; }
+#freight .ov-speed #fConvoyBox.on { display: flex; }
+.cvcode { background: #eef1f5; color: #15233f; font-weight: 800; font-size: 17px; letter-spacing: 3px; padding: 3px 9px 3px 12px; border-radius: 6px; border: 2px solid #15233f; box-shadow: inset 0 0 0 1.5px #eef1f5; }
+.cvm { display: flex; flex-direction: column; line-height: 1.15; font-size: 13px; color: var(--muted); white-space: nowrap; }
+#freight .ov-speed .cvm b { display: block; font-size: 15px; font-weight: 700; line-height: 1.15; color: var(--text); letter-spacing: 0; }
+
+/* the speed limit: a Canadian-style sign under the speedometer */
+#freight .ov-speed .lim { display: none; margin-top: 5px; align-items: center; gap: 6px; width: max-content; padding: 2px 8px; background: #f4f4f1; color: #111; border: 2px solid #111; border-radius: 4px; line-height: 1; }
+#freight .ov-speed .lim:not(:empty) { display: inline-flex; }
+#freight .ov-speed .lim span { font-size: 9px; font-weight: 800; letter-spacing: .04em; color: #111; }
+#freight .ov-speed .lim strong { font-size: 19px; font-weight: 800; }
+#freight .ov-speed .lim.over { background: #ffdad4; border-color: #b3261e; }
+#freight .ov-speed .comp { display: none; }                        /* the old arrow stays in the DOM (the map updates it); the compass card replaces it */
+
+/* the compass: a traditional card. The dial turns so north stays north, the pointer on top is where the truck faces. */
+#fCompass { position: absolute; top: 12px; right: 12px; z-index: 5; width: 112px; height: 112px; border-radius: 50%; pointer-events: none;
+  background: color-mix(in srgb, var(--panel, #1c1b1f) 86%, transparent); border: 1px solid var(--line); backdrop-filter: blur(6px); display: grid; place-items: center; }
+#fCompass .dial { position: absolute; inset: 6px; border-radius: 50%; border: 0; padding: 0; background: none;
+  transition: transform .25s linear; }
+#fCompass .dial::before { content: ""; position: absolute; inset: 0; border-radius: 50%;
+  background: repeating-conic-gradient(from -.7deg, var(--muted) 0 1.4deg, transparent 1.4deg 15deg);
+  -webkit-mask: radial-gradient(circle, transparent 0 80%, #000 81%); mask: radial-gradient(circle, transparent 0 80%, #000 81%); }
+#fCompass .dial span { position: absolute; font-size: 15px; font-weight: 800; color: var(--text); }
+#fCompass .dial .n { top: 6px; left: 50%; transform: translateX(-50%); color: #ff5a4d; }
+#fCompass .dial .s { bottom: 6px; left: 50%; transform: translateX(-50%); }
+#fCompass .dial .e { right: 8px; top: 50%; transform: translateY(-50%); }
+#fCompass .dial .w { left: 8px; top: 50%; transform: translateY(-50%); }
+#fCompass .lub { position: absolute; top: -3px; left: 50%; margin-left: -7px; width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 12px solid var(--amber); }
+#fCompass .deg { position: relative; z-index: 1; font-size: 18px; font-weight: 800; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; }
+#fCompass .deg small { display: none; }
+
+/* truck pictures: the game's own previews, in the Garage list, the selected truck and the top bar */
+#freight .gcfg { flex-direction: row; align-items: center; gap: 12px; }
+#freight .gcfg .gtxt { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+#freight .gcfg .pic { width: 104px; height: 58px; object-fit: cover; border-radius: 6px; flex: none; background: var(--panel); }
+#freight .picbig { width: 100%; max-height: 240px; object-fit: cover; border-radius: 10px; background: var(--panel); }
+#freight .chippic { width: 64px; height: 36px; object-fit: cover; border-radius: 6px; flex: none; }
+
+/* keep the truck chip and the Garage columns inside the screen */
+#freight .fbar { gap: 18px; }
+#freight .fchip { flex: 0 1 270px; min-width: 150px; }
+#freight .chippic { width: 52px; height: 30px; }
+#freight .fgarage { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
+#freight .fgarage > .card { min-width: 0; }
+#freight { grid-template-columns: minmax(0, 1fr); }
+#freight .fpage { min-width: 0; }
+
+/* the vehicle chip sits in the middle of the free space in the header, clear of the mode switcher */
+#freight .fchip { margin-left: auto; margin-right: auto; align-self: center; }
+#freight .fchip { height: 44px; padding: 0 12px; box-sizing: border-box; transform: translateY(-6px); }   /* the mode switcher's height, on its centre line */
+
+/* head tracking */
+.fhead { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 12px; flex: 1; min-height: 0; }
+.fheadcol { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
+.fheadcol h2 { margin: 2px 0 0; font-size: 20px; font-weight: 800; } .fheadcol h3 { margin: 8px 0 0; font-size: 16px; }
+.fheadcol select { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 15px; }
+.hprev { position: relative; border-radius: 10px; overflow: hidden; background: #000; aspect-ratio: 4 / 3; max-height: 300px; align-self: stretch; display: grid; place-items: center; }
+.hprev.off { display: none; }
+.hprev video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }           /* a mirror, so left is left */
+.hprev canvas { position: absolute; inset: 0; width: 100%; height: 100%; transform: scaleX(-1); pointer-events: none; }
+.hstatus { font-size: 15px; color: var(--muted); } .hstatus.bad { color: var(--brake, #ff7a6b); }
+.hres { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; font-size: 14px; color: var(--muted); }
+.hres label { display: flex; flex-direction: column; gap: 4px; } .hres label:has(input[type=checkbox]) { flex-direction: row; align-items: center; gap: 8px; color: var(--text); }
+.hslide { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 16px; font-weight: 600; margin-top: 10px; }
+.hslide output { color: var(--amber); font-variant-numeric: tabular-nums; } .hslide input { grid-column: 1 / -1; width: 100%; accent-color: var(--amber); }
+.hhelp { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.hinv { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 14px 0 6px; font-size: 14px; color: var(--muted); } .hinv span { flex-basis: 100%; }
+.hinv label { display: flex; gap: 6px; align-items: center; color: var(--text); }
+.hrow { display: grid; grid-template-columns: 90px 1fr 80px 1fr 80px; gap: 8px; align-items: center; font-size: 13px; margin: 6px 0; }
+.hrow em { font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hbar { position: relative; height: 8px; border-radius: 4px; background: var(--panel2); }
+.hbar b { position: absolute; left: 50%; top: -2px; width: 1px; height: 12px; background: var(--dim); }
+.hbar i { position: absolute; top: -3px; width: 10px; height: 14px; margin-left: -5px; border-radius: 3px; background: var(--text); }
+.hbar.view i { background: var(--amber); }
+body.headon #fHeadBtn { display: block; }
+#fHeadBtn { position: absolute; top: 134px; right: 12px; z-index: 5; }
+@media (max-width: 1000px) { .fhead { grid-template-columns: 1fr; overflow-y: auto; } }
+
+/* the head tracking page: its own view, in every mode (so it brings its own button styles) */
+#head, #headBtn { --amber: #f2b134; --brake: #ff7a6b; }
+#head { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); font-family: "Overpass", "Barlow Condensed", "Arial Narrow", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+#head button, #head input, #head select { font-family: inherit; }
+#head .hbar { display: flex; align-items: center; gap: 16px; padding: 10px 18px; border-radius: 10px; }
+#head .hbar h1 { font-size: 26px; font-weight: 800; }
+#head .hnote { font-size: 14px; color: var(--muted); }
+#head .hbtn { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font-size: 15px; font-weight: 600; cursor: pointer; }
+#head .hbtn:hover { border-color: var(--amber); }
+#head .hbtn.hgo { background: var(--md-primary); color: var(--md-on-primary); border-color: transparent; font-weight: 800; }
+#head .hchips { display: flex; gap: 6px; }
+#head .hchips button { background: none; border: 0; border-radius: 8px; padding: 6px 14px; font-size: 16px; font-weight: 600; color: var(--muted); cursor: pointer; }
+#head .hchips button.on { background: color-mix(in srgb, var(--md-on-surface) 11%, transparent); color: var(--text); }
+#head .card { border-radius: 10px; }
+#headBtn.live { color: var(--amber); }
+#headBtn.live::after { content: ""; position: absolute; right: 9px; top: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
+#headBtn { position: relative; }
+#head .hbar { padding-right: 350px; }                    /* the mode switcher floats at the top right */

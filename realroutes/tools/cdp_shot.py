@@ -9,8 +9,11 @@ import websockets
 
 
 class Browser:
-    def __init__(self, w=1334, h=800, port=0):
+    def __init__(self, w=1334, h=800, port=0, camera=None, headless=True, real_gpu=False):
+        """camera: None, "fake" (a made-up test picture) or "real" (the computer's webcam, allowed without asking).
+        headless=False shows a window; real_gpu=True lets the browser use the graphics chip instead of the software renderer."""
         self.w, self.h = w, h
+        self.camera, self.headless, self.real_gpu = camera, headless, real_gpu
         if not port:                                   # a free port, so an old browser can never be picked up by mistake
             with socket.socket() as sk:
                 sk.bind(("127.0.0.1", 0)); port = sk.getsockname()[1]
@@ -22,10 +25,18 @@ class Browser:
         self.dir = tempfile.mkdtemp()
         self._open = True
         atexit.register(self.__exit__)
-        self.proc = subprocess.Popen(["microsoft-edge-stable", "--headless=new", "--disable-gpu", "--use-gl=angle", "--use-angle=swiftshader",
-                                      "--enable-unsafe-swiftshader", "--hide-scrollbars", f"--window-size={self.w},{self.h}",
-                                      f"--remote-debugging-port={self.port}", f"--user-data-dir={self.dir}", "--no-first-run", "about:blank"],
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        args = ["microsoft-edge-stable"]
+        if self.headless:
+            args.append("--headless=new")
+        if not self.real_gpu:
+            args += ["--disable-gpu", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"]
+        if self.camera:
+            args.append("--use-fake-ui-for-media-stream")                       # the camera is allowed without a prompt
+            if self.camera == "fake":
+                args.append("--use-fake-device-for-media-stream")
+        args += ["--hide-scrollbars", f"--window-size={self.w},{self.h}", f"--remote-debugging-port={self.port}",
+                 f"--user-data-dir={self.dir}", "--no-first-run", "about:blank"]
+        self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(60):
             try:
                 tabs = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{self.port}/json", timeout=1).read())

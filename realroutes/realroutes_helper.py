@@ -25,9 +25,19 @@ OFF_ROUTE_M = 120
 JOLT, THROW = 3.0, 5.5  # m/s² horizontal: uncomfortable / standing passengers thrown
 
 
+def beamdeck_relay_hint():
+    """The music relay address from BeamDeck's own settings: the freight hub runs on the same machine."""
+    base = os.environ.get("APPDATA") if os.name == "nt" else (os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"))
+    try:
+        return json.load(open(os.path.join(base or "", "BeamDeck" if os.name == "nt" else "beamdeck", "config.json"))).get("mp_relay", "")
+    except Exception:
+        return ""
+
+
 # shared console settings (see Helper.set_prefs)
 PREF_DEFAULTS = {"v": 0, "mode": "bus", "speechOn": True, "speechVol": 0.9, "speechRate": 0.85, "speakOn": "auto", "sayStops": True,
-                 "sayRiders": True, "sayNav": True, "voice": 0, "mapView": "chase", "mapStyle": "dark"}
+                 "sayRiders": True, "sayNav": True, "voice": 0, "mapView": "chase", "mapStyle": "dark",
+                 "mpOn": False, "mpHub": "", "mpName": "", "clock": "12"}      # freight multiplayer: on/off, the hub's address, the driver name
 # Piper's en_US-libritts_r-medium has 904 speakers; these are the announcer voices offered in the settings
 N_SPEAKERS = 904
 VOICES = [92, 7, 136, 245, 351, 467, 580, 713]
@@ -259,6 +269,9 @@ class Shift:
             self.waiting.append([self._dest(rng, i) for _ in range(k)])
         self.rng = rng
         self.onboard = []
+        # fares: each passenger pays as they board (OC Transpo's cash fares; a few ride without paying)
+        self.fares, self.fare_n, self.dodged = 0.0, 0, 0
+        self.earn = None                     # the helper's career_earn (CareerMP's payday)
         self.events = []
         self.t0 = time.monotonic()
         self.clock0 = self.sched_dep[0] - 60     # one minute to get ready at the first stop
@@ -307,6 +320,22 @@ class Shift:
 
     def requested(self, i):
         return any(d == i for d in self.onboard)
+
+    FARES = ((3.85, 0.70, "Fare"), (2.95, 0.26, "Fare (student / senior)"), (0.0, 0.04, None))   # amount, share, label
+
+    def _fare(self):
+        r, acc = random.random(), 0.0
+        for amount, share, label in self.FARES:
+            acc += share
+            if r <= acc:
+                break
+        if not label:
+            self.dodged += 1                 # no fare: rides anyway
+            return
+        self.fares += amount
+        self.fare_n += 1
+        if self.earn:
+            self.earn("bus", amount, label)
 
     def update(self, lat, lon, speed, doors, ax=0.0, ay=0.0):
         """One pose from the game (10 Hz). Returns a list of game commands."""
@@ -377,6 +406,7 @@ class Shift:
                 if self.waiting[i] and int(d["work"] / BOARD_S) > int(prev / BOARD_S):
                     self.onboard.append(self.waiting[i].pop(0))
                     d["boarded"] += 1
+                    self._fare()
             elif not doors or ds < -AT_STOP_M:
                 # doors shut (or drove off with them open)
                 d = self.dwell
@@ -482,7 +512,7 @@ class Shift:
         return {"route": self.route["route"], "headsign": self.p["headsign"], "color": self.route["color"],
                 "text": self.route["text"], "state": self.state, "clock": hhmm(now), "clock_s": now,
                 "deviation": round(dev), "next": nxt, "index": self.i, "total": self.n,
-                "onboard": len(self.onboard), "requested": self.i < self.n and self.requested(self.i),
+                "onboard": len(self.onboard), "fares": round(self.fares, 2), "fareN": self.fare_n, "requested": self.i < self.n and self.requested(self.i),
                 "comfort": round(self.comfort), "speed": round(self.speed * 3.6), "doors": self.doors,
                 "lateral": round(self.lateral), "off_route": self.lateral > OFF_ROUTE_M,
                 "progress": round(self.prog), "length": round(self.line.length),
@@ -519,12 +549,14 @@ class Helper:
         import sys
         if HERE not in sys.path:
             sys.path.insert(0, HERE)
-        import rides, people, nav, freight
+        import rides, people, nav, freight, freight_mp
         self.people = people
         self.nav = nav.Nav()                                # turn-by-turn on the planned GPS route, for every client
         self._nav_t = 0
         # settings every client shares (mode, map, what is spoken and where), so the tablet, a PC browser and the
         # Android Auto app stay in step; "v" goes up on every change
+        self.head_dir = os.path.join(data_root, "head")      # the face tracking model, downloaded once (see head_asset)
+        self._head_lock = threading.Lock()
         self._prefs_file = os.path.join(data_root, "prefs.json")
         self.prefs = dict(PREF_DEFAULTS)
         try:
@@ -539,6 +571,16 @@ class Helper:
         os.makedirs(data_root, exist_ok=True)
         self.rides = rides.Rides(self.send, data_root, announce=self.announce)
         self.freight = freight.Freight(self.send, data_root, announce=self.announce)   # trucking jobs, the garage, the truck panel
+        # CareerMP (our 0.40 fork): jobs, the hourly payslip and the shared clock live in the game; Real Routes sends
+        # what each job earned (career_earn) and shows the jobs and payslips the game reports (on_career)
+        self.career = {"active": False, "main": None, "second": None, "world": None, "slip": None, "jobs": []}
+        self.freight.earn = self.career_earn
+        self.rides.earn = self.career_earn
+        self.mp = freight_mp.MP(self.freight, lambda: self.prefs, data_root, relay_hint=beamdeck_relay_hint)   # shared jobs and convoys
+        self.freight.mp = self.mp
+        self.freight.lock = self.lock                       # hub calls run outside it, a convoy job's start inside
+        self.freight.on_start = lambda: self.rides.go_online(False)   # a freight job and Rides exclude each other
+        self.mp.start()
         self.pa, self._pa_id = [], 0                        # announcements for the tablet to speak
         self.stock, self._stock_key = None, None            # a regular map's own bus lines
         self._page = (0, "")                                # console.html mtime, version hash
@@ -576,6 +618,25 @@ class Helper:
             except Exception as e:
                 log("speech failed:", e)
 
+    def career_earn(self, role, amount, label):
+        """Money a job made, for this hour's payslip (the game adds it to the career money at payday). Outside a
+        CareerMP career the game ignores it, and Real Routes' own totals still count it."""
+        try:
+            self.send([{"cmd": "careerEarn", "role": role, "amount": round(float(amount), 2), "label": str(label)[:60]}])
+        except (TypeError, ValueError):
+            pass
+
+    def on_career(self, m):
+        """The game's careerMPJobs: the jobs, the clock and the last payslip (on every change and every few seconds)."""
+        c = self.career
+        for k in ("active", "main", "second", "world", "jobs"):
+            if k in m:
+                c[k] = m[k]
+        if m.get("slip"):
+            c["slip"] = m["slip"]
+            if m["slip"].get("paid"):
+                self.announce(f"Payday. {m['slip'].get('total', 0):.0f} dollars.", "app")
+
     def speech_to(self):
         """Where announcements are spoken: the chosen place if it's there, else BeamDeck, the phone, the tablet."""
         have = {"beamdeck": bool(self.pc_voice()), "aa": time.time() - self.aa_seen < 5, "tablet": True}
@@ -591,8 +652,12 @@ class Helper:
                 v = round(min(1.3, max(0.6, float(v))), 2)
             if k == "speechVol" and isinstance(v, (int, float)) and not isinstance(v, bool):
                 v = round(min(1.5, max(0.0, float(v))), 2)
+            if k in ("mpName", "mpHub") and isinstance(v, str):
+                v = v.strip()[:60]
             if k in PREF_DEFAULTS and k != "v" and type(v) is type(PREF_DEFAULTS[k]) and v != self.prefs.get(k):
                 if k == "speakOn" and v not in ("auto", "beamdeck", "aa", "tablet"):
+                    continue
+                if k == "clock" and v not in ("12", "24", "auto"):
                     continue
                 self.prefs[k] = v
                 changed = True
@@ -622,7 +687,7 @@ class Helper:
             self.stock = None
 
     def page_version(self):
-        files = [os.path.join(HERE, f) for f in ("console.html", "freight.js", "freight.css")]
+        files = [os.path.join(HERE, f) for f in ("console.html", "freight.js", "freight.css", "head.js", "headfilter.js")]
         mt = max(os.path.getmtime(f) for f in files)
         if mt != self._page[0]:
             import hashlib
@@ -702,6 +767,8 @@ class Helper:
                             self._record(self.shift)
                     else:
                         self.rides.update(m)
+                elif m.get("type") == "career":
+                    self.on_career(m)
                 elif m.get("type") == "places":
                     if not self.freight.on_places(m):             # freight asked for its own (ids "fq…")
                         self.rides.on_places(m)
@@ -750,6 +817,7 @@ class Helper:
                 self._record(self.shift, early=True)
             self.shift = Shift(r, p, trip, live)
             self.shift.announce = self.announce
+            self.shift.earn = self.career_earn
             cmds = self.shift.start_cmds()
             if not go:
                 cmds = cmds[1:]
@@ -876,6 +944,7 @@ class Helper:
                    "shift": self.shift.view() if self.shift else None,
                    "rides": self.rides.view(),
                    "freight": self.freight.view(),
+                   "mp": self.mp.view(),
                    "sign": self.sign | {"next": self.sign["stops"][self.sign["idx"]] if self.sign["stops"] else None,
                                         "locked": self.shift_running()},
                    "data": {"ready": self.routes_data() is not None, "bake": self.bake_state,
@@ -884,6 +953,7 @@ class Helper:
                             else ("stock:none" if self.flat else self.agency)},
                    "nav": self.nav.view if out_connected(g) else None,
                    "prefs": self.prefs,
+                   "career": self.career,
                    "speech": {"to": self.speech_to(), "beamdeck": bool(self.pc_voice()),
                               "aa": time.time() - self.aa_seen < 5, "voices": len(VOICES)},
                    "pa": self.pa, "page": self.page_version()}
@@ -905,6 +975,87 @@ class Helper:
             elif c == "goto" and self.shift:
                 self.send(self.shift.start_cmds()[:1])
 
+    HEAD_ADDR = ("127.0.0.1", 47152)            # the mod's head tracking extension listens here
+    # The face tracking runs in the page (MediaPipe, on the integrated graphics); its files are fetched once from their publisher
+    # at a fixed version and checked against these hashes before they are kept or served, so what the page runs never changes.
+    HEAD_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14"
+    HEAD_ASSETS = {
+        "vision_bundle.mjs": (HEAD_CDN + "/vision_bundle.mjs", "text/javascript", "e77f281f9619150d937023c355bae170e9120e3b9e43f1e23a2a7bee07197669"),
+        "vision_wasm_internal.js": (HEAD_CDN + "/wasm/vision_wasm_internal.js", "text/javascript", "9440cf0cc0cea21800e31581ec32aeedcc5fbf9df4509796bbc7d3f99e52ab9c"),
+        "vision_wasm_internal.wasm": (HEAD_CDN + "/wasm/vision_wasm_internal.wasm", "application/wasm", "f82a8e6c05e08a44cc9f9e7ec5f845935bcbb1b1500ebe8c2f4812fb4e2917dc"),
+        "vision_wasm_nosimd_internal.js": (HEAD_CDN + "/wasm/vision_wasm_nosimd_internal.js", "text/javascript", "abe9b6fbeaf86fcb53a5edce3926c82ccb0619e18fed4d9d9ce561ee7f55e054"),
+        "vision_wasm_nosimd_internal.wasm": (HEAD_CDN + "/wasm/vision_wasm_nosimd_internal.wasm", "application/wasm", "38b61feab2fd7934e05cbe9f68baa308978a5e3b7f85c1913bb8ae89b8ef8b97"),
+        "face_landmarker.task": ("https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                                 "application/octet-stream", "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"),
+    }
+
+    def head_asset(self, name):
+        """(status, bytes, content type) for one of the tracking model's files: from the local copy, fetched and verified first if needed."""
+        import hashlib, urllib.request
+        spec = self.HEAD_ASSETS.get(name)
+        if not spec:
+            return 404, b'{"error": "unknown file"}', "application/json"
+        url, ctype, sha = spec
+        path = os.path.join(self.head_dir, name)
+        with self._head_lock:                                       # one download at a time, the rest wait for it
+            data = None
+            try:
+                data = open(path, "rb").read()
+            except OSError:
+                pass
+            if data is None or hashlib.sha256(data).hexdigest() != sha:
+                try:
+                    with urllib.request.urlopen(url, timeout=90) as r:
+                        data = r.read()
+                except OSError:
+                    return 502, b'{"error": "The face tracking files could not be downloaded: is this computer online?"}', "application/json"
+                if hashlib.sha256(data).hexdigest() != sha:
+                    return 502, b'{"error": "The downloaded file did not match its checksum, so it was not kept"}', "application/json"
+                os.makedirs(self.head_dir, exist_ok=True)
+                with open(path + ".part", "wb") as f:
+                    f.write(data)
+                os.replace(path + ".part", path)
+        return 200, data, ctype
+
+    def head_send(self, body):
+        """Passes a head pose to the game (yaw, pitch, roll in degrees, x, y, z in centimetres); no lock, it is called at frame rate."""
+        msg = {"type": "head", "on": bool(body.get("on", True))}
+        for k, lim in (("yaw", 180), ("pitch", 90), ("roll", 90), ("x", 60), ("y", 60), ("z", 60)):
+            try:
+                v = float(body.get(k, 0) or 0)
+            except (TypeError, ValueError):
+                v = 0.0
+            msg[k] = max(-lim, min(lim, v)) if v == v else 0.0
+        now = time.time()
+        stamps = getattr(self, "_head_stamps", None)
+        if stamps is None:
+            stamps = self._head_stamps = []
+        stamps.append(now)
+        while stamps and now - stamps[0] > 2.0:
+            stamps.pop(0)
+        if not getattr(self, "_head_sock", None):
+            self._head_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            self._head_sock.sendto(json.dumps(msg).encode(), self.HEAD_ADDR)
+        except OSError:
+            return {"ok": False}
+        return {"ok": True}
+
+    def head_probe(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.5)
+        try:
+            s.sendto(b'{"type":"probe"}', self.HEAD_ADDR)
+            data, _ = s.recvfrom(8192)
+            stamps = getattr(self, "_head_stamps", [])
+            now = time.time()
+            recent = [t for t in stamps if now - t <= 2.0]
+            return {"ok": True, "sent_per_s": round(len(recent) / 2.0, 1), "sent_age": round(now - stamps[-1], 2) if stamps else None} | json.loads(data)
+        except (OSError, ValueError):
+            return {"ok": False, "error": "The game doesn't answer: start BeamNG with the BeamDeck mod"}
+        finally:
+            s.close()
+
     def handle(self, method, path, qs, body):
         """One console request; path is relative to the console's root ("" or "/" is the page).
         Returns (status, bytes, content type)."""
@@ -917,6 +1068,14 @@ class Helper:
             if f in ("maplibre-gl.js", "maplibre-gl.css"):
                 return 200, open(os.path.join(HERE, "maplibre", f), "rb").read(), \
                     "text/javascript" if f.endswith(".js") else "text/css"
+        if method == "POST" and path == "/api/head":                       # a head pose from the webcam tracker (about 30 a second)
+            return js(self.head_send(body))
+        if method == "GET" and path.startswith("/head/asset/"):
+            return self.head_asset(os.path.basename(path))
+        if method == "GET" and path == "/api/head/probe":                  # what the game's camera is doing (the tracker page's status, and the tests)
+            return js(self.head_probe())
+        if method == "GET" and path == "/api/vehicle/preview":            # a truck's picture for the Garage
+            return self.freight.previews.respond(qs.get("model", ""), qs.get("config", ""))
         if method == "GET" and path.startswith("/avatars/"):
             from urllib.parse import unquote
             name = unquote(path[len("/avatars/"):]).rsplit(".", 1)[0]
@@ -962,7 +1121,8 @@ class Helper:
                       "/manifest.json": ("manifest.json", "application/manifest+json"), "/sw.js": ("sw.js", "text/javascript"),
                       "/icon.svg": ("icon.svg", "image/svg+xml"), "/icon-512.png": ("icon-512.png", "image/png"),
                       "/m3color.js": ("m3color.js", "text/javascript"), "/freight.js": ("freight.js", "text/javascript"),
-                      "/freight.css": ("freight.css", "text/css")}
+                      "/freight.css": ("freight.css", "text/css"),
+                      "/headfilter.js": ("headfilter.js", "text/javascript"), "/head.js": ("head.js", "text/javascript")}
             if path in static:
                 f, ctype = static[path]
                 return 200, open(os.path.join(HERE, f), "rb").read(), ctype
@@ -996,6 +1156,10 @@ class Helper:
                     with open(self._theme_file, "w") as f:
                         json.dump(self.theme, f)
                 return js({"ok": True})
+            if path == "/api/career":                       # the tablet's job picker: {main, second}
+                main, second = body.get("main"), body.get("second")
+                self.send([{"cmd": "careerJobs", "main": main or "", "second": second or ""}])
+                return js({"ok": True})
             if path == "/api/prefs":
                 with self.lock:
                     return js(self.set_prefs(body))
@@ -1013,6 +1177,13 @@ class Helper:
                 return js({"ok": True})
             if path == "/api/freight":
                 act = body.get("action")
+                if act in ("mp_chat", "mp_leave", "mp_create", "mp_join"):      # these talk to the hub: not under the lock
+                    if act in ("mp_create", "mp_join"):
+                        with self.lock:
+                            if self.shift_running():
+                                return js({"ok": False, "error": "End the bus shift first"})
+                    ok, res = self.freight.act(body)
+                    return js({"ok": ok, "error": None if ok else res, "result": res if ok and isinstance(res, dict) else None})
                 with self.lock:
                     if act == "start":
                         if self.shift_running():
@@ -1101,7 +1272,7 @@ def make_handler(h):
             code, data, ctype = h.handle(method, u.path, dict(parse_qsl(u.query)), body)
             self.send_response(code)
             self.send_header("Content-Type", ctype)
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", "private, max-age=3600" if code == 200 and (ctype.startswith("image/") or u.path.startswith("/head/asset/")) else "no-store")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)

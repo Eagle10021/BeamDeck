@@ -724,6 +724,8 @@ class Rides:
         pay = round(r["fare"] + tip, 2)
         mmss = lambda sec: f"{int(sec // 60)}:{int(sec % 60):02d}"
         self.stats["earned"] = round(self.stats["earned"] + pay, 2)
+        if getattr(self, "earn", None):                       # CareerMP: this hour's payslip, as the ride-share job
+            self.earn("rideshare", pay, f"Ride: {r['name']}")
         self.stats["total_earned"] = round(self.stats["total_earned"] + pay, 2)
         self.stats["trips"] += 1
         self.stats["total_trips"] += 1

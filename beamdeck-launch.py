@@ -111,7 +111,9 @@ def main():
                           "--window-size=540,860", "--class=BeamDeck", "--no-first-run", "--no-default-browser-check",
                           # its own profile: let the car sound start without a click first (otherwise Chromium keeps the
                           # audio paused, and the music shared with other players is silence until a click)
-                          "--autoplay-policy=no-user-gesture-required"],
+                          "--autoplay-policy=no-user-gesture-required",
+                          # a game covering the window must not slow the page down (the sound, and head tracking from the webcam)
+                          "--disable-renderer-backgrounding", "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows"],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     open(os.path.join(DATA, "window.pid"), "w").write(str(p.pid))
     if WINDOWS:

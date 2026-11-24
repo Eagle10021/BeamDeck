@@ -78,6 +78,11 @@ HUBS = [
 ]
 # the road, in driving order: highway 416 from Ottawa to the 401 at Prescott, then the 401 west to Toronto. Towns between
 # two of these are the natural drops of a run along the corridor.
+# Supply chains: what a delivery turns into at the drop-off. Delivering logs to a sawmill leaves lumber waiting there, lumber
+# leaves building materials, and so on: the next job starts exactly where the last driver dropped off. Every chain ends.
+CHAINS = {"logs": "lumber", "lumber": "rigid_flatbed", "steel": "pipes", "pipes": "rigid_flatbed", "gravel": "concrete",
+          "milk": "dryvan", "container": "dryvan", "dryvan": "parcels"}
+
 CORRIDOR = ["Ottawa", "Kemptville", "Prescott", "Brockville", "Mallorytown", "Lansdowne", "Gananoque", "Kingston", "Napanee",
             "Deseronto", "Belleville", "Trenton", "Brighton", "Colborne", "Cobourg", "Port Hope", "Bowmanville", "Oshawa",
             "Whitby", "Ajax", "Pickering", "Scarborough", "Toronto"]

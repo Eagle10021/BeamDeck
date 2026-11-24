@@ -5,7 +5,7 @@
 -- Needs BeamNG.Earth (its modding API gives real coordinates). The bus displays work on the stock city bus.
 local M = {}
 
-local MOD_VERSION = 6              -- the helper (freight.py MOD_REQUIRED) warns when the game runs an older copy of this file
+local MOD_VERSION = 8              -- the helper (freight.py MOD_REQUIRED) warns when the game runs an older copy of this file
 
 local socket = require("socket")
 local udp
@@ -232,9 +232,6 @@ local function exportRoads()
   return roadsFile
 end
 
--- the level's own bus lines (levels/<map>/buslines/*.buslines.json + the "busstops" triggers), the way the game's
--- busRouteManager reads them, with the road path between the stops: written once per level, path sent in hello
-local busFor, busFile = nil, nil
 local function tr(s)
   if type(s) ~= "string" or s == "" then return s end
   if translateLanguage then
@@ -243,6 +240,156 @@ local function tr(s)
   end
   return s
 end
+-- the level's freight places (regular maps), best source first: BeamNG's own delivery businesses (the career's
+-- facilities: warehouses, shops, fuel stations, trailer yards, with what each ships and takes), then the big map's
+-- points of interest, then spots spread over the AI road network, so a map with roads but neither of those still
+-- has places to haul between. Written once per level; the path goes in hello (freightSites).
+local sitesFor, sitesFile = nil, nil
+local COMPASS = {"North", "North-east", "East", "South-east", "South", "South-west", "West", "North-west"}
+local ROAD_ROLES = {"Depot", "Yard", "Warehouse", "Industrial park", "Distribution centre", "Works", "Terminal", "Supply yard"}
+local function prettyId(s)
+  s = tostring(s or ""):gsub("(%l)(%u)", "%1 %2"):gsub("[_%-]+", " ")
+  return (s:gsub("^%l", string.upper))
+end
+local function facilitySites(lvl)
+  local out, spots = {}, {}
+  local dir = "/levels/" .. lvl .. "/facilities/"
+  local ok, files = pcall(function() return FS:findFiles(dir, "*.sites.json", -1, true, false) end)
+  for _, f in ipairs(ok and files or {}) do
+    local d = jsonReadFile(f)
+    for _, ps in ipairs(d and d.parkingSpots or {}) do
+      if ps.name and type(ps.pos) == "table" then spots[ps.name] = ps.pos end
+    end
+  end
+  local ok2, ffiles = pcall(function() return FS:findFiles(dir, "*.facilities.json", -1, true, false) end)
+  for _, f in ipairs(ok2 and ffiles or {}) do
+    local d = jsonReadFile(f)
+    local group = f:match("([^/]+)%.facilities%.json$") or ""
+    for _, pr in ipairs(d and d.deliveryProviders or {}) do
+      local types, gives, takes, best, any = {}, false, false, nil, nil
+      for _, ap in ipairs(pr.manualAccessPoints or {}) do
+        local pos = spots[ap.psName]
+        if pos then
+          any = any or pos
+          for _, t in ipairs(ap.logisticTypesProvided or {}) do types[t] = true; gives = true end
+          for _, t in ipairs(ap.logisticTypesReceived or {}) do types[t] = true; takes = true end
+          if tostring(ap.psName):lower():find("trailer", 1, true) then best = pos end   -- a trailer yard suits a truck
+        end
+      end
+      local pos = best or any
+      if pos then
+        local name = tr(pr.name)
+        if not name or name == pr.name or name:find("^ui%.") then name = prettyId(pr.id) end
+        local tl = {}
+        for t in pairs(types) do tl[#tl + 1] = t end
+        local lat, lon = toFlat(vec3(pos[1], pos[2], pos[3] or 0))
+        out[#out + 1] = {name = name, lat = lat, lon = lon, z = pos[3], group = group, types = tl, gives = gives,
+                         takes = takes, source = "facility"}
+      end
+    end
+  end
+  return out
+end
+local function poiSites(lvl)
+  local out = {}
+  local ok, list = pcall(function() return gameplay_rawPois and gameplay_rawPois.getRawPoiListByLevel(lvl) end)
+  for _, e in ipairs(ok and list or {}) do
+    local bm = e.markerInfo and e.markerInfo.bigmapMarker
+    if bm and bm.pos and bm.name then
+      local bp = vec3(bm.pos)
+      local lat, lon = toFlat(bp)
+      out[#out + 1] = {name = tr(bm.name), lat = lat, lon = lon, z = bp.z, group = e.data and e.data.type or "place",
+                       types = {}, source = "poi"}
+    end
+  end
+  return out
+end
+-- spots spread over the road network: the node furthest from every spot already picked, again and again
+local function roadSites(m, have, want)
+  local nodes = {}
+  for _, n in pairs(m.nodes or {}) do
+    local links = 0
+    for _ in pairs(n.links or {}) do links = links + 1 end
+    if links >= 1 and (n.radius or 0) >= 2.5 then nodes[#nodes + 1] = n.pos end
+  end
+  if #nodes < 2 then return {} end
+  local cx, cy = 0, 0
+  for _, p in ipairs(nodes) do cx, cy = cx + p.x, cy + p.y end
+  cx, cy = cx / #nodes, cy / #nodes
+  local picked = {}
+  for _, s in ipairs(have) do picked[#picked + 1] = vec3(s.lon * K_LON, s.lat * K_LAT, 0) end
+  local out, used = {}, {}
+  for k = 1, want do
+    local bestD, bestP = -1, nil
+    for _, p in ipairs(nodes) do
+      local dmin = math.huge
+      for _, q in ipairs(picked) do
+        local d = (p.x - q.x) ^ 2 + (p.y - q.y) ^ 2
+        if d < dmin then dmin = d end
+      end
+      if #picked == 0 then dmin = -((p.x - cx) ^ 2 + (p.y - cy) ^ 2) end   -- the first one: the middle of the map
+      if dmin > bestD then bestD, bestP = dmin, p end
+    end
+    if not bestP or (#picked > 0 and bestD < 300 * 300) then break end    -- closer than 300 m to another: enough
+    picked[#picked + 1] = bestP
+    local ang = math.deg(math.atan2(bestP.x - cx, bestP.y - cy)) % 360
+    local near = math.sqrt((bestP.x - cx) ^ 2 + (bestP.y - cy) ^ 2) < 400
+    local base = (near and "Central" or COMPASS[math.floor((ang + 22.5) / 45) % 8 + 1]) .. " " .. ROAD_ROLES[(k - 1) % #ROAD_ROLES + 1]
+    used[base] = (used[base] or 0) + 1
+    local lat, lon = toFlat(bestP)
+    out[#out + 1] = {name = used[base] > 1 and (base .. " " .. used[base]) or base, lat = lat, lon = lon, z = bestP.z,
+                     group = "road", types = {}, source = "road"}
+  end
+  return out
+end
+-- the map's named spawn points (the spots its makers named: lookouts, summits, canyon floors...), for the challenge
+-- routes (climbs and descents between them) and as places on maps with few others
+local function spawnSites(lvl)
+  local out = {}
+  local info = core_levels and core_levels.getLevelByName and core_levels.getLevelByName(lvl)
+  for _, sp in ipairs(info and info.spawnPoints or {}) do
+    local o = sp.objectname and scenetree.findObject(sp.objectname)
+    if o then
+      local p = vec3(o:getPosition())
+      local name = tr(sp.translationId)
+      if not name or name == sp.translationId or name:find("^levels%.") then name = prettyId(sp.objectname:gsub("^spawn_", "")) end
+      local lat, lon = toFlat(p)
+      out[#out + 1] = {name = name, lat = lat, lon = lon, z = p.z, group = "spawn", types = {}, source = "spawn"}
+    end
+  end
+  return out
+end
+local function exportFreightSites()
+  local lvl = getCurrentLevelIdentifier and getCurrentLevelIdentifier()
+  if not lvl then return nil end
+  if sitesFor == lvl then return sitesFile end
+  local m = map and map.getMap and map.getMap()
+  if not (m and m.nodes and next(m.nodes)) then return nil end         -- the road graph isn't loaded yet: next hello
+  local sites = facilitySites(lvl)
+  if #sites < 8 then
+    for _, s in ipairs(poiSites(lvl)) do sites[#sites + 1] = s end
+  end
+  for _, sp in ipairs(spawnSites(lvl)) do                 -- unless another place is already there
+    local dup = false
+    for _, s in ipairs(sites) do
+      if ((s.lat - sp.lat) * K_LAT) ^ 2 + ((s.lon - sp.lon) * K_LON) ^ 2 < 150 * 150 then dup = true; break end
+    end
+    if not dup then sites[#sites + 1] = sp end
+  end
+  if #sites < 10 then
+    for _, s in ipairs(roadSites(m, sites, 12 - #sites)) do sites[#sites + 1] = s end
+  end
+  local vpath = "/beamdeck_media/realroutes/freight_sites.json"
+  jsonWriteFile(vpath, {level = lvl, title = flat.place().place, sites = sites}, false)
+  sitesFor = lvl
+  sitesFile = FS:getFileRealPath(vpath)
+  log("I", "realroutes", string.format("freight sites for %s: %d", lvl, #sites))
+  return sitesFile
+end
+
+-- the level's own bus lines (levels/<map>/buslines/*.buslines.json + the "busstops" triggers), the way the game's
+-- busRouteManager reads them, with the road path between the stops: written once per level, path sent in hello
+local busFor, busFile = nil, nil
 local function exportBuslines()
   local lvl = getCurrentLevelIdentifier and getCurrentLevelIdentifier()
   if not lvl then return nil end
@@ -481,6 +628,7 @@ local function pumpVehicles()
 end
 
 -- ---- the rig: the job's truck, teleported to the pickup, with a trailer that fits its hitch ----
+local placeBus                 -- (the bus placement below: a regular map's truck goes down the same way)
 local rig = nil                -- {id, stage, truck, dest, trailers, tIdx, truckId, trailerId, ...}
 local rigTrailers = {}         -- ids of the trailers this extension spawned (removed with the job)
 local rigTeleported = false
@@ -753,7 +901,13 @@ local function rigUpdate()
       rig.stage = "teleport"
     end
   elseif rig.stage == "teleport" then
-    if not (a and a ~= flat and a.teleport) then rigFail("Freight needs BeamNG.Earth's world loaded."); return end
+    if a == flat then                         -- a regular map: put the truck there straight away
+      placeBus({lat = rig.dest.lat, lon = rig.dest.lon, heading = rig.heading})
+      rigSay("Moving to the pickup…")
+      rig.stage, rig.next = "settle", now + 1.5
+      return
+    end
+    if not (a and a.teleport) then rigFail("Freight needs BeamNG.Earth's world or a regular map loaded."); return end
     rigTeleported = false
     local ok, why = a.teleport(rig.dest.lat, rig.dest.lon, rig.dest.name)
     if ok == false then rigFail("Could not move to the pickup: " .. tostring(why)); return end
@@ -822,10 +976,20 @@ local function rigUpdate()
   end
 end
 
+-- the game's pause (the Esc menu or the pause key): a job's clock stops while it is on
+local function gamePaused()
+  local ok, r = pcall(function()
+    if simTimeAuthority and simTimeAuthority.getPause then return simTimeAuthority.getPause() end
+    if bullettime and bullettime.getPause then return bullettime.getPause() end
+    return false
+  end)
+  return ok and r == true
+end
+
 local function rigStart(c)
   if rig and rig.id == c.id and rig.stage ~= "done" then return end    -- a repeated command
   rigClearTrailers()
-  rig = {id = c.id, truck = c.truck, dest = c.at, trailers = c.trailers or {}, prefer = PREFER[c.needs] or {},
+  rig = {id = c.id, truck = c.truck, dest = c.at, heading = c.heading, trailers = c.trailers or {}, prefer = PREFER[c.needs] or {},
          stage = "wait_truck", t0 = os.clockhp(), next = os.clockhp() + 1.2, defer = c.deferLoad == true}
   rigSay("Spawning the truck…")
   core_vehicles.replaceVehicle(c.truck.model, {config = "vehicles/" .. c.truck.model .. "/" .. c.truck.config .. ".pc"})
@@ -874,7 +1038,7 @@ local TRUCK_CMDS = {
 }
 
 -- ---- placing the bus at the first stop ----
-local function placeBus(g)
+function placeBus(g)                   -- (declared local above, with the rig)
   local a, v = api(), player()
   if not (a and v) then return end
   local x, y, z = a.toGame(g.lat, g.lon, 0)
@@ -1420,12 +1584,38 @@ handlers.kneel = function() vehLua('local c = controller.getController("bus") if
 handlers.hazards = function() vehLua("electrics.toggle_warn_signal()") end
 handlers.notify = function(c) message(c.text, c.secs) end
 handlers.vehicles = function() listVehicles() end
+-- ---- CareerMP (our 0.40 fork): jobs, the hourly payslip and the shared clock live in careerMPJobs / careerMPWorld;
+-- Real Routes reports what each job earned and shows the jobs on the tablet. Without CareerMP these do nothing.
+local function careerJobs() return rawget(_G, "careerMPJobs") end
+local function sendCareer(extra)
+  local J = careerJobs()
+  if not (J and J.getUI) then return end
+  local ok, ui = pcall(J.getUI)
+  if not ok or type(ui) ~= "table" then return end
+  local msg = {type = "career", active = ui.career, main = ui.main, second = ui.second, world = ui.world, jobs = ui.jobs}
+  for k, v in pairs(extra or {}) do msg[k] = v end
+  send(msg)
+end
+handlers.careerEarn = function(c)
+  local J = careerJobs()
+  if J and J.earn and tonumber(c.amount) then J.earn(tostring(c.role or ""), tonumber(c.amount), tostring(c.label or "")) end
+end
+handlers.careerJobs = function(c)
+  local J = careerJobs()
+  if J and J.setRoles then J.setRoles(c.main ~= "" and tostring(c.main) or nil, c.second ~= "" and tostring(c.second) or nil) end
+  sendCareer()
+end
+M.onCareerMPJobsChanged = function() sendCareer() end
+M.onCareerMPPayslip = function(slip) sendCareer({slip = slip}) end
+
 handlers.freightSpawn = function(c) rigStart(c) end
 handlers.freightClear = function() rigClearTrailers(); rig = nil end
 -- the driver chose to skip the drive to the pickup
 handlers.freightGoto = function(c)
   local a = api()
-  if a and a ~= flat and a.teleport and tonumber(c.lat) and tonumber(c.lon) then a.teleport(c.lat, c.lon, c.name) end
+  if not (tonumber(c.lat) and tonumber(c.lon)) then return end
+  if a == flat then placeBus({lat = c.lat, lon = c.lon, heading = c.heading})
+  elseif a and a.teleport then a.teleport(c.lat, c.lon, c.name) end
 end
 -- at the pickup: hook the trailer on and / or put the load on the deck
 handlers.freightLoad = function(c)
@@ -1583,9 +1773,12 @@ local function onUpdate(dtReal)
   if helloTimer <= 0 then
     helloTimer = 5
     local isFlat = a == flat
-    send({type = "hello", rr = MOD_VERSION, earth = a and a.earthVersion and a.earthVersion() or nil, mapPort = mapPort(),
+    send({type = "hello", rr = MOD_VERSION, gamePath = pcall(function() return FS:getGamePath() end) and FS:getGamePath() or nil,
+          userPath = pcall(function() return FS:getUserPath() end) and FS:getUserPath() or nil, player = (MPConfig and MPConfig.getNickname and MPConfig.getNickname()) or nil, earth = a and a.earthVersion and a.earthVersion() or nil, mapPort = mapPort(),
           flat = isFlat or nil, level = isFlat and getCurrentLevelIdentifier() or nil,
-          roads = isFlat and exportRoads() or nil, buslines = isFlat and exportBuslines() or nil})
+          roads = isFlat and exportRoads() or nil, buslines = isFlat and exportBuslines() or nil,
+          freightSites = isFlat and exportFreightSites() or nil})
+    sendCareer()                                         -- the jobs and the clock for the tablet (CareerMP only)
   end
   if not (a and a.ready and a.ready()) then return end
   local p = a.pose()
@@ -1593,7 +1786,7 @@ local function onUpdate(dtReal)
   local lim = a.speedLimit and a.speedLimit()
   local g = a.gps and a.gps()
   sendRoute(a)
-  send({type = "pose", lat = p.lat, lon = p.lon, heading = p.heading, speed = p.speed or 0,
+  send({type = "pose", lat = p.lat, lon = p.lon, heading = p.heading, speed = p.speed or 0, paused = gamePaused() or nil,
         gpsLeft = g and g.remaining or nil, gpsEta = g and g.eta or nil, gpsOff = g and g.off or nil,
         model = (function() local v = player(); return v and v:getJBeamFilename() or nil end)(),
         place = a.place and a.place() or nil, gpsName = g and g.name or nil,

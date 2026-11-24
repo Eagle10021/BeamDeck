@@ -209,6 +209,7 @@ class FakeGame:
 
 def start(data_dir=None):
     from http.server import ThreadingHTTPServer
+    H.beamdeck_relay_hint = lambda: ""          # tests never read this machine's own BeamDeck config: that would reach the real freight hub
     h = H.Helper(data_dir or tempfile.mkdtemp())
     srv = ThreadingHTTPServer(("127.0.0.1", H.HTTP_PORT), H.make_handler(h))
     threading.Thread(target=srv.serve_forever, daemon=True).start()

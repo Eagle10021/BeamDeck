@@ -2191,7 +2191,8 @@ def open_routes_window():
         return False
     subprocess.Popen([browser, f"--app=http://127.0.0.1:{PORT}/routes/", "--user-data-dir=" + os.path.join(DATA_DIR, "browser-profile"),
                       "--window-size=1280,800", "--no-first-run", "--no-default-browser-check",
-                      "--autoplay-policy=no-user-gesture-required"],
+                      "--autoplay-policy=no-user-gesture-required",
+                      "--disable-renderer-backgrounding", "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows"],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      **({"creationflags": 0x08000000} if WINDOWS else {"start_new_session": True}))
     return True
@@ -2235,7 +2236,7 @@ class H(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "private, max-age=3600" if code == 200 and (ctype.startswith("image/") or "/head/asset/" in u.path) else "no-store")
         self.end_headers()
         self.wfile.write(data)
 

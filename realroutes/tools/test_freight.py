@@ -254,6 +254,19 @@ sc = fr._score(fr.job)
 ok(sc["fines"] == 0 and sc["cond_f"] == 1.0 and sc["time_f"] == 1.0 and sc["stars"] == 5.0 and sc["pay"] == o2["pay"],
    "with every rule off, damaged cargo and late delivery still receive full pay and 5 stars")
 # one rule at a time: only that part of the pay and stars is forgiven
+# --- spare time on every job, and a clock that follows the game's pause
+base_of = lambda o: (o["km"] / (36 if o["km"] < 30 else 58 if o["km"] < 150 else 76) * 60 + 10 + 4 * len(o["stops"])) * F.SLACK
+plain = [o for o in fr.market["offers"] if not o.get("contract") and o["kind"] in ("local", "regional", "long")]
+ok(plain and all(o["mins"] - base_of(o) >= 55 for o in plain), "every job has at least an hour of spare time on top of the driving time")
+ok(F.extra_min(430) == 120 and 60 <= F.extra_min(20) < 70 and F.extra_min(430, "rush") == 60, "the spare time is an hour on a short job, two on a long haul, half on an express")
+left0 = fr._job_view()["left"]
+hold(45.0, -75.0, 120, speed=5.0, paused=True)
+ok(abs(fr._job_view()["left"] - left0) <= 1 and fr._job_view()["paused"], "pausing the game stops the job's clock")
+hold(45.0, -75.0, 30, speed=5.0)
+ok(29 <= left0 - fr._job_view()["left"] <= 31 and not fr._job_view()["paused"], "and it runs again afterwards")
+t_gone = clock[0]; clock[0] += 600                                     # ten minutes with the game closed or frozen
+fr.update(pose(45.0, -75.0, speed=5.0))
+ok(left0 - fr._job_view()["left"] <= 32, "the clock does not run while the game is not talking")
 fr.act({"action": "late", "on": True})
 sc = fr._score(fr.job)
 ok(sc["cond_f"] == 1.0 and sc["time_f"] < 1.0 and sc["stars"] < 5.0, "late delivery on alone: the time penalty applies, damage is free")
@@ -270,5 +283,38 @@ _d = tempfile.mkdtemp()
 json.dump({"penalties": False}, open(os.path.join(_d, "freight.json"), "w"))
 _old = F.Freight(lambda c: None, _d)
 ok(not _old.damage and not _old.late and _old.tickets, "an older save's single penalties switch carries over to damage and late")
+
+# --- supply chains: a delivery becomes the next job, right where it was dropped off
+drop = {"name": "Cardinal Sawmill", "lat": 44.79, "lon": -75.38, "hub": "Cardinal"}
+chain_job = lambda cargo, chain=None: {"offer": {"id": "ochain001", "cargo": cargo, "chain": chain} if chain else {"id": "ochain001", "cargo": cargo},
+                                       "pts": [{"name": "Start", "lat": 45.0, "lon": -75.0}, drop]}
+nxt = fr._chain_offer(chain_job("logs"))
+ok(nxt and nxt["cargo"] == "lumber" and nxt["from"]["name"] == "Cardinal Sawmill" and nxt["chain"]["step"] == 2,
+   "delivering logs leaves lumber waiting at the drop-off")
+ok("Cardinal Sawmill" in nxt["blurb"] and nxt["title"].startswith("Supply chain") and nxt["expires"] > time.time() + 3600, "the job says where it came from and stays around a while")
+plain_pay = fr._make_offer(__import__("random").Random(1), D.CARGO_BY_ID["lumber"], nxt["from"], nxt["stops"], nxt["kind"])["pay"]
+ok(nxt["pay"] > plain_pay, "and it pays more than the same haul would on its own")
+nxt3 = fr._chain_offer(chain_job("lumber", nxt["chain"]))
+ok(nxt3 and nxt3["cargo"] == "rigid_flatbed" and nxt3["chain"]["step"] == 3 and nxt3["chain"]["id"] == nxt["chain"]["id"], "the next link carries the chain on")
+ok(nxt3["pay"] / max(1, fr._make_offer(__import__("random").Random(1), D.CARGO_BY_ID["rigid_flatbed"], nxt3["from"], nxt3["stops"], nxt3["kind"])["pay"]) > 1.2, "and later links pay more still")
+ok(fr._chain_offer(chain_job("parcels")) is None and fr._chain_offer(chain_job("rigid_flatbed")) is None, "a chain ends: parcels and building materials leave nothing behind")
+ends = set(D.CHAINS)
+ok(all(v in D.CARGO_BY_ID for v in D.CHAINS.values()) and all(k in D.CARGO_BY_ID for k in D.CHAINS), "every chain link is a real cargo")
+seen = set()
+for k in D.CHAINS:                                                        # no chain loops
+    x, n = k, 0
+    while x in D.CHAINS and n < 10:
+        x = D.CHAINS[x]; n += 1
+    seen.add(n < 10)
+ok(seen == {True}, "no chain goes round in a circle")
+before = len(fr.market["offers"])
+fr.job = chain_job("gravel") | {"cond": 100.0, "started": time.time() - 600, "dist_m": 20000, "tickets": 0, "jolts": 0, "crash": 0, "max_kmh": 70,
+                                 "fuel0": None, "drop_times": [], "rig": None, "log": [], "mins": 60, "truck": {"name": "T"}, "idx": 2,
+                                 "offer": {"id": "ochain002", "cargo": "gravel", "title": "Gravel", "icon": "", "load": "gravel", "km": 20, "pay": 800,
+                                           "weight": 20, "stops": [drop], "needs": "tractor", "mins": 60, "hazard": False, "fragile": 0.1, "rush": False}}
+fr.mp = None
+fr._finish()
+made = [o for o in fr.market["offers"] if o.get("chain")]
+ok(len(fr.market["offers"]) == before + 1 and made and made[-1]["cargo"] == "concrete", "finishing a job puts its follow-up on the board")
 
 print("\nall freight tests passed")

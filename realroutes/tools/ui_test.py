@@ -163,5 +163,94 @@ shot("7_summary")
 post("api/freight", {"action": "dismiss"})
 shot("8_history", "#freight/history")
 shot("9_board_after")
+
+# --- multiplayer: the console against a real hub, with a second player driven over HTTP
+import importlib.util, tempfile, threading
+spec = importlib.util.spec_from_file_location("hub", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "relay", "freight-hub.py"))
+hub = importlib.util.module_from_spec(spec); os.environ["BEAMDECK_HUB_DATA"] = tempfile.mkdtemp(); spec.loader.exec_module(hub)
+hsrv = hub.ThreadingHTTPServer(("127.0.0.1", 0), hub.Handler); hsrv.daemon_threads = True
+threading.Thread(target=hsrv.serve_forever, daemon=True).start()
+HUB = f"127.0.0.1:{hsrv.server_address[1]}"
+
+
+def hubpost(path, body):
+    r = urllib.request.Request(f"http://{HUB}{path}", json.dumps(body).encode(), {"Content-Type": "application/json"})
+    return json.loads(urllib.request.urlopen(r, timeout=10).read())
+
+
+shot("10_multi_off", "#freight/multi")
+print("   DEBUG status:", repr(B.js("document.getElementById('fMpStatus').textContent")), "| tab on:", B.js("document.querySelector('#fTabs .on') && document.querySelector('#fTabs .on').dataset.v"), "| errors:", B.errors[-3:], "| hash:", B.js("location.hash"), "| mp:", get("api/state").get("mp"))
+ok("off" in B.js("document.getElementById('fMpStatus').textContent").lower(), "the Multiplayer tab says it is off until switched on")
+ok(B.js("getComputedStyle(document.getElementById('fSharedChip')).display") == "none", "no Shared filter while multiplayer is off")
+post("api/prefs", {"mpHub": HUB, "mpName": "Eagle"})                      # the test hub first, so nothing is ever sent elsewhere
+c = B.center('#fMpOn button[data-v="1"]')
+B.press(c[0], c[1], 0.06); B.wait(0.6)                                  # a real click on On
+ok(wait(lambda: get("api/state")["mp"].get("connected"), 15, "the hub"), "switching it on connects to the hub")
+good = wait(lambda: get("api/state")["mp"]["shared"] >= 4, 15, "shared jobs")
+if not good:
+    st = get("api/state"); print("   MP:", {k: st["mp"].get(k) for k in ("connected", "error", "shared")}, "| market hub:", st["freight"].get("hub"), "| hub offers:", len(hub.offers))
+ok(good, "the hub's board fills with shared jobs")
+board = get("api/freight/board")
+shared = [o for o in board["offers"] if o.get("shared")]
+ok(len(shared) >= 4, "shared jobs appear on this player's board")
+def fitting():
+    return next((o for o in get("api/freight/board")["offers"] if o.get("shared") and o["fits"]), None)
+ok(wait(lambda: fitting() is not None, 40, "a shared job this truck can carry"), "a shared job this truck can carry is on the board")
+pick = fitting()
+FID = "ffffffff-9999"
+fjob = {}
+
+
+def friend(**kw):                                   # the friend's BeamDeck: its job is remembered between pings
+    if "job" in kw:
+        fjob.clear(); fjob.update(kw["job"])
+    return hubpost("/api/presence", {"pid": FID, "name": "Skynet", "lat": 45.5, "lon": -75.6, "kmh": 70,
+                                     "truck": {"name": "Gavril T-Series", "label": "Tractor"}, "job": fjob} | {k: v for k, v in kw.items() if k != "job"})
+
+
+friend()
+threading.Thread(target=lambda: [(friend(), time.sleep(5)) for _ in range(150)], daemon=True).start()   # a real client pings every 2 s
+code = hubpost("/api/convoy", {"pid": FID, "action": "create", "offer": pick})["code"]
+hubpost("/api/chat", {"pid": FID, "text": "bring snacks"})
+ok(wait(lambda: any(p["name"] == "Skynet" for p in get("api/state")["mp"].get("players", [])), 10, "the friend"), "the friend shows as a driver")
+shot("11_multi_on", "#freight/multi", 4)
+page = lambda: B.js("document.getElementById('fpMulti').innerText") or ""
+good = wait(lambda: all(w in page() for w in ("Skynet", code, "bring snacks")), 15, "the multiplayer page to fill")
+if not good:
+    print("   page text:", page()[:900].replace("\n", " | "))
+    print("   hub offers (id, seconds to expiry):", [(o["id"], round(o["expires"] - time.time()) if o.get("expires") else None) for o in hub.offers.values()])
+    print("   hub chat:", [m["text"] for m in hub.chat][-4:], "| helper chat:", [m["text"] for m in get("api/state")["mp"].get("chat", [])][-4:])
+ok(good, "the tab lists the friend, the open convoy's code and the chat")
+B.goto("about:blank"); B.goto(BASE + "#freight"); B.wait(3.5)
+ok(B.js("getComputedStyle(document.getElementById('fSharedChip')).display") != "none", "the Shared filter appears when multiplayer is on")
+c = B.center('#fFilters button[data-f="shared"]'); B.press(c[0], c[1], 0.06)
+cards = lambda: B.js("document.querySelectorAll('#fJobsList .offer').length") or 0
+good = wait(lambda: cards() >= 4, 10, "the shared cards")
+if not good: print("   cards:", cards(), "| list:", (B.js("document.getElementById('fJobsList').innerText") or "")[:200].replace("\n", " | "))
+ok(good and "Shared" in B.js("document.getElementById('fJobsList').innerText"), "the Shared filter shows the shared jobs, tagged")
+ok(B.js("document.querySelectorAll('#fJobsList .convoy').length") >= 1, "fitting jobs offer a Convoy button")
+B.goto("about:blank"); B.goto(BASE + "#freight/multi"); B.wait(3.5)
+wait(lambda: B.center('[data-join]') is not None, 12, "the Join button")
+c = B.center('[data-join]'); ok(c is not None, "the friend's convoy has a Join button")
+B.press(c[0], c[1], 0.06)                                               # a real click: joins and takes the same job
+ok(wait(lambda: fr()["job"] and fr()["job"]["id"] == pick["id"], 15, "the convoy job"), "joining takes the convoy's job")
+ok(get("api/state")["mp"]["convoy"] == code, "and this player is in the convoy")
+friend(job={"title": pick["title"], "phase": "driving", "pct": 35, "offer": pick["id"], "to": "Somewhere"})
+B.wait(3.0)
+ok(wait(lambda: B.js("document.getElementById('fConvoyBox').classList.contains('on')"), 10, "convoy box"), "the convoy box shows over the map while driving")
+box = B.js("document.getElementById('fConvoyBox').innerText")
+ok(code in box and "Skynet" in box and "35%" in box, f"it lists the drivers and their progress ({box!r})")
+B.shot(os.path.join(out, "12_convoy_driving.png"))
+post("api/freight", {"action": "cancel"}); B.wait(1.0)
+B.goto("about:blank"); B.goto(BASE + "#freight/multi"); B.wait(3.5)
+B.js("document.getElementById('fMpText').value = 'on my way'")
+c = B.center('#fMpSend'); B.press(c[0], c[1], 0.06)
+ok(wait(lambda: any(m["text"] == "on my way" for m in hubpost("/api/presence", {"pid": FID, "name": "Skynet"})["chat"]), 10, "the chat message"), "a chat message typed here reaches the other player")
+c = B.center('#fMpLeave'); ok(c is not None and B.js("getComputedStyle(document.getElementById('fMpLeave')).display") != "none", "the convoy page has a Leave button in view")
+B.press(c[0], c[1], 0.06)
+ok(wait(lambda: get("api/state")["mp"]["convoy"] == "", 10, "leave"), "leaving the convoy works")
+post("api/prefs", {"mpOn": False})
+ok(wait(lambda: not get("api/state")["mp"]["on"] and not [o for o in get("api/freight/board")["offers"] if o.get("shared")], 10, "multiplayer to switch off"), "switching it off drops the shared jobs")
+if B.errors: print("   JS ERRORS:", B.errors[-5:]); B.errors.clear()
 B.__exit__()
 print("\nscreenshots in", out)
