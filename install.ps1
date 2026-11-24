@@ -65,7 +65,9 @@ if ($AndroidAuto -and -not (Test-Path "$data\dhu\desktop-head-unit.exe")) {
 # Real Routes speech: Piper (an offline neural voice) in its own Python environment, and a voice model with
 # 904 speakers (one for the announcer, the others for riders). Piper needs Python 3.9-3.13.
 $piperPy = "$data\piper\Scripts\python.exe"
-if (-not ((Test-Path $piperPy) -and (& $piperPy -c "import piper" 2>$null; $LASTEXITCODE -eq 0))) {
+$piperOk = $false
+if (Test-Path $piperPy) { & $piperPy -c "import piper" 2>$null; $piperOk = ($LASTEXITCODE -eq 0) }
+if (-not $piperOk) {
     $baseExe = $null; $baseArgs = @()
     if (Get-Command py.exe -ErrorAction SilentlyContinue) {
         foreach ($v in "3.12", "3.13", "3.11", "3.10") { & py.exe "-$v" -c "1" 2>$null; if ($LASTEXITCODE -eq 0) { $baseExe = "py.exe"; $baseArgs = @("-$v"); break } }
@@ -81,7 +83,9 @@ if (-not ((Test-Path $piperPy) -and (& $piperPy -c "import piper" 2>$null; $LAST
 }
 # head tracking with this computer's camera from any screen: a native tracker in its own Python environment
 $htPy = "$data\headtrack\Scripts\python.exe"
-if (-not ((Test-Path $htPy) -and (& $htPy -c "import mediapipe, cv2" 2>$null; $LASTEXITCODE -eq 0))) {
+$htOk = $false
+if (Test-Path $htPy) { & $htPy -c "import mediapipe, cv2" 2>$null; $htOk = ($LASTEXITCODE -eq 0) }
+if (-not $htOk) {
     if (-not $baseExe) {                         # (set above only when Piper was installed this time)
         $baseArgs = @()
         if (Get-Command py.exe -ErrorAction SilentlyContinue) {
