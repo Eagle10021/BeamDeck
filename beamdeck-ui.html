@@ -2119,20 +2119,24 @@
     }
 
     // ---------------- bass → car shake ----------------
-    let slowBass = 0
+    // how hard the bass hits in an analyser's current sound, 0..1 (state.slow holds its running average)
+    function punchOf(analyser, bins, state) {
+      analyser.getByteFrequencyData(bins)
+      const hz = ctx.sampleRate / analyser.fftSize
+      const lo = Math.max(1, Math.round(30 / hz)), hi = Math.max(lo + 1, Math.round(110 / hz))
+      let sum = 0
+      for (let i = lo; i <= hi; i++) sum += bins[i]
+      const avg = sum / (hi - lo + 1) / 255
+      state.slow = (state.slow || 0) + (avg - (state.slow || 0)) * 0.05
+      const base = Math.max(0, (avg - 0.5) / 0.35)
+      const punch = Math.max(0, avg - state.slow - 0.04) * 5
+      return Math.min(1, Math.pow(base, 1.5) * 0.7 + punch)
+    }
+    const ownBass = {}
     function bassLevel() {
       const pcmSound = performance.now() - pcmAt < 500
       if (!nodes || (!pcmSound && (master.paused || master.readyState < 3 || master.seeking))) return 0
-      nodes.analyser.getByteFrequencyData(nodes.bins)
-      const hz = ctx.sampleRate / nodes.analyser.fftSize
-      const lo = Math.max(1, Math.round(30 / hz)), hi = Math.max(lo + 1, Math.round(110 / hz))
-      let sum = 0
-      for (let i = lo; i <= hi; i++) sum += nodes.bins[i]
-      const avg = sum / (hi - lo + 1) / 255
-      slowBass += (avg - slowBass) * 0.05
-      const base = Math.max(0, (avg - 0.5) / 0.35)
-      const punch = Math.max(0, avg - slowBass - 0.04) * 5
-      return Math.min(1, Math.pow(base, 1.5) * 0.7 + punch)
+      return punchOf(nodes.analyser, nodes.bins, ownBass)
     }
     function sendBass() {
       const v = bassLevel() * +$("shake").value
@@ -2499,6 +2503,7 @@
       if (!vOn) stopVoiceWs()
       mpMe = me || null
       applyRemote(mp ? mp.cars || [] : [])
+      if (mp && mp.shake) sendRemoteBass(mp.cars || [])     // (only a game mod that understands it says so)
       applyVoices(mp ? mp.voice || [] : [])
       const hearing = Object.keys(remote)
       if (performance.now() - mpDbgAt > 2000) {
@@ -2564,6 +2569,12 @@
         if (name === mpMe) return
         if (kind === 86) return voiceIn(name, b.subarray(2 + n))      // 'V': their voice (an Opus packet)
         if (kind === 83) {                         // 'S': their car screen → the local game, on their car (through the helper)
+          if (b[2 + n] === 78) {                   // 'N' (their info) also carries their bass shake strength
+            try {
+              const s = JSON.parse(new TextDecoder().decode(b.subarray(3 + n))).shake
+              if (typeof s === "number") shakeOf[name] = Math.max(0, Math.min(2, s))
+            } catch (x) { }
+          }
           const out = new Uint8Array(b.length); out[0] = 82; out.set(b.subarray(1), 1)    // 'R' + [len][name][type][data]
           if (ws && ws.readyState === 1) ws.send(out)      // (ws = the helper connection)
           return
@@ -2591,8 +2602,11 @@
       const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 900
       const pan = ctx.createStereoPanner(), gain = ctx.createGain(); gain.gain.value = 0
       srcNode.connect(hp); hp.connect(lp); lp.connect(pan); pan.connect(gain); gain.connect(ctx.destination)
+      const analyser = ctx.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.6
+      srcNode.connect(analyser)                   // before the distance effects: their car shakes with this
       const r = remote[name] = {
         name, audio, ms, sb: null, queue: [], chain: { lp, pan, gain }, rate: 1, gen,
+        analyser, bins: new Uint8Array(analyser.frequencyBinCount),
         bornAt: performance.now()
       }      // (silent at first: see applyRemote)
       ms.addEventListener("sourceopen", () => {
@@ -2612,6 +2626,24 @@
       delete remote[name]
       try { r.audio.pause(); URL.revokeObjectURL(r.audio.src); r.audio.removeAttribute("src"); r.audio.load() } catch (e) { }
       try { r.chain.gain.disconnect() } catch (e) { }
+    }
+    // The bass shake of other players' cars: measured here from their music as it plays, so it is in time with what
+    // is heard. Strength follows their slider (the local one if theirs isn't known); the local slider at 0 turns it off.
+    const shakeOf = {}
+    let remoteShaking = false
+    function sendRemoteBass(cars) {
+      const own = +$("shake").value, out = {}
+      let any = false
+      for (const name in remote) {
+        const r = remote[name], c = cars.find(x => x.name === name)
+        let v = 0
+        if (own > 0 && c && c.dist < 150 && !r.audio.paused && r.audio.readyState >= 3 && performance.now() - r.bornAt > 900)
+          v = punchOf(r.analyser, r.bins, r) * (name in shakeOf ? shakeOf[name] : own)
+        out[name] = v
+        if (v > 0) any = true
+      }
+      if (any || remoteShaking) send({ type: "remotebass", cars: out })
+      remoteShaking = any
     }
     let resyncAt = {}, resyncs = {}
     function resync(name) {
@@ -2681,7 +2713,7 @@
           p: current && current.kind === "track" ? master.currentTime : +$("seek").value || 0,
           z: current && current.kind === "track" ? master.paused : ($("pp").dataset.paused === "1" || $("pp").textContent.trim() === "▶")
         } : null
-        scrSend("N", new TextEncoder().encode(JSON.stringify({ mode, np, pane: mode === "aa" ? mapPane : "" })))
+        scrSend("N", new TextEncoder().encode(JSON.stringify({ mode, np, pane: mode === "aa" ? mapPane : "", shake: +$("shake").value })))
         if (mode === "np" && lastNow.cover !== scrCover) {     // the cover when it changes (256 px JPEG)
           scrCover = lastNow.cover
           if (!lastNow.cover) scrSend("C", new Uint8Array(0))

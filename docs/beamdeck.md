@@ -35,7 +35,7 @@ The sound comes "from the car" (clear inside, muffled outside), heavy bass shake
 | **Car audio** | Inside: full range with a little low-end, like door speakers. Outside: clearer and louder the more doors, trunk or windows are open or broken on your side; closed, it's low-passed (900 Hz falling to 250 Hz with distance), quieter with distance, panned to the car. Android Auto's sound goes through it too |
 | **Pause with game** | Pauses the video while BeamNG is paused |
 | **Preview** | Shows the video (or Android Auto, tappable) in the window too |
-| **Bass shake** (0–2) | Heavy bass makes the doors buzz (24 Hz, left and right doors opposite) and the body shake (9 Hz) |
+| **Bass shake** (0–2) | Heavy bass makes the doors buzz (12 Hz, left and right doors opposite) and the body bounce (3 Hz); on BeamMP the other players see it on your car too |
 | **Files** | Opens `~/.cache/beamdeck` (saved videos, named `<title> [<key>].webm`) to delete them |
 | **Android Auto** | The phone's Android Auto on the car screen (see 2) |
 | **Game map** | BeamNG's GPS map wherever Android Auto is showing Google Maps (left pane, right pane or full screen); hidden while no map is showing |

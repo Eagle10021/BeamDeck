@@ -44,6 +44,7 @@ local function carVehicle()
 end
 local shakeByVeh = {}    -- vehId -> what the bass shake is doing (reported by the vehicle)
 local bass, bassAt, bassSentAt = 0, -1, -1
+local remoteBass = {}    -- BeamMP player name -> {v, at, fresh, vid}: the bass shake of that player's car
 local camPos, vehPos, right = vec3(), vec3(), vec3()
 
 -- ---- clicking the car's screen (Android Auto). Each car model's screen is set up once by clicking its
@@ -298,6 +299,12 @@ local function receive()
       bass = tonumber(d.bass) or 0
       bassAt = os.clockhp()
       newBass = true
+    elseif ok and type(d) == "table" and d.rbass ~= nil then
+      for name, v in pairs(d.rbass) do
+        local r = remoteBass[name] or {}
+        r.v, r.at, r.fresh = tonumber(v) or 0, os.clockhp(), true
+        remoteBass[name] = r
+      end
     elseif ok and type(d) == "table" then
       local req = tonumber(d.calib) or 0
       if lastCalibReq ~= nil and req > lastCalibReq then
@@ -414,7 +421,7 @@ local function mpInfo(cam, camRight)
         end
       end
     end
-    return {me = MPConfig.getNickname and MPConfig.getNickname() or nil, cars = cars, voice = voice}
+    return {me = MPConfig.getNickname and MPConfig.getNickname() or nil, cars = cars, voice = voice, shake = true}
   end)
   return ok and res or nil
 end
@@ -553,8 +560,30 @@ local function remoteScreen(body)
   end
 end
 
+local function setCarBass(vid, v)
+  local veh = be:getObjectByID(vid)
+  if veh then
+    veh:queueLuaCommand(string.format(
+      'if not beamdeckScreens then extensions.load("beamdeckScreens") end beamdeckScreens.setBass(%.3f)', v))
+  end
+end
+
 local function remoteTick()
   local now = os.clockhp()
+  for name, r in pairs(remoteBass) do
+    if r.v > 0 and now - r.at > 0.5 then r.v, r.fresh = 0, true end    -- their music stopped arriving
+    local vid = mpCarOf[name]
+    if r.vid and r.vid ~= vid then                                     -- they changed cars: still the old one
+      setCarBass(r.vid, 0)
+      r.vid, r.fresh = nil, true
+    end
+    if r.fresh and vid and (r.v > 0 or r.vid) then
+      setCarBass(vid, r.v)
+      r.vid = r.v > 0 and vid or nil
+    end
+    r.fresh = false
+    if not r.vid and now - r.at > 5 then remoteBass[name] = nil end
+  end
   for name, r in pairs(remoteScr) do
     if now - r.last > 6 or not be:getObjectByID(r.vid) then remoteStop(name) end
   end

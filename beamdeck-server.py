@@ -1169,6 +1169,12 @@ def on_ws_message(m, ws=None):
             udp.sendto(json.dumps({"bass": round(float(m.get("v", 0)), 3)}).encode(), ("127.0.0.1", GAME_PORT))
         except Exception:
             pass
+    elif t == "remotebass":                     # other players' cars (BeamMP): player name -> bass level
+        try:
+            cars = {str(k)[:64]: round(float(v), 3) for k, v in list((m.get("cars") or {}).items())[:32]}
+            udp.sendto(json.dumps({"rbass": cars}, ensure_ascii=False).encode("utf-8"), ("127.0.0.1", GAME_PORT))
+        except Exception:
+            pass
     elif t == "screens":
         player["screens"] = bool(m.get("on"))
         broadcast({"type": "screensState", "on": player["screens"]})
