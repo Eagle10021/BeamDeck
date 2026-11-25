@@ -73,7 +73,7 @@ Everything BeamDeck plays (videos, the music library, Navidrome, **App sound** a
 
 #### Bass Shake
 
-Heavy bass physically moves the car: the doors flex in and out and lids buzz (about 12 Hz), and on big hits the body bounces and rocks (about 3 Hz). It only reacts to real bass (a gate ignores quiet or mid-range music), follows the strength slider in the **Car** tab (0 turns it off), and works on any car with doors or a body to move. On BeamMP, players who share music also see each other's cars shake: each BeamDeck measures the bass from the stream it is playing, and the strength follows the sender's slider while their screen is shared (0 on your own slider turns it off).
+Heavy bass physically moves the car: the doors flex in and out and lids buzz (about 12 Hz), and on big hits the body bounces and rocks (about 3 Hz). It only reacts to real bass (a gate ignores quiet or mid-range music), follows the strength slider in the **Car** tab (0 turns it off), and works on any car with doors or a body to move. On BeamMP, players who share music also see each other's cars shake: each BeamDeck measures the bass from the stream it is playing, and the strength follows the sender's slider while their screen is shared (0 on your own slider turns it off). With head tracking on, the driver figure in your car turns its head with yours, and other BeamMP players with the mod see it.
 
 ### Android Auto
 

@@ -662,7 +662,50 @@ local function frameUpdate(dt)
   end
 end
 
+-- head tracking: the local car's driver turns their head with the player's (BeamMP shows it to everyone)
+local headTimer, headCar = 0, nil
+local function headTick(dt)
+  headTimer = headTimer + dt
+  if headTimer < 0.05 then return end
+  headTimer = 0
+  local tracking = beamdeckHead and beamdeckHead.active and beamdeckHead.active()
+  local veh = tracking and carVehicle() or nil
+  local player = getPlayerVehicle(0)
+  if veh and (not player or player:getId() ~= veh:getId()) then veh = nil end      -- not sitting in it
+  local id = veh and veh:getId()
+  if headCar and headCar ~= id then
+    local old = be:getObjectByID(headCar)
+    if old then old:queueLuaCommand("if beamdeckScreens then beamdeckScreens.setHead(0, 0, 0, false) end") end
+    headCar = nil
+  end
+  if veh then
+    local p = beamdeckHead.get()
+    veh:queueLuaCommand(string.format(
+      'if not beamdeckScreens then extensions.load("beamdeckScreens") end beamdeckScreens.setHead(%.1f, %.1f, %.1f, true)',
+      p.yaw, p.pitch, p.roll))
+    headCar = id
+  end
+end
+
+-- another player's car with a tracked head: makes its seated figure visible (their seat is unknown to this game)
+local function showDriver(vehId, partPath)
+  local veh = be:getObjectByID(vehId)
+  if not veh or isMine(veh) or not settings.getValue("enableSeatOccupants", true) then return end
+  local data = core_vehicle_manager.getVehicleData(vehId)
+  if not data or not data.vdata then return end
+  for _, list in ipairs({data.vdata.flexbodies or {}, data.vdata.props or {}}) do
+    for _, m in pairs(list) do
+      local kind = m.originalMesh or m.mesh
+      if m.partPath == partPath and m.mesh and (kind == "character_head" or kind == "character_torso") then
+        veh:setMeshAlpha(1, m.mesh)
+      end
+    end
+  end
+end
+M.showDriver = showDriver
+
 local function onUpdate(dtReal)
+  headTick(dtReal)
   openSocket()
   receive()
   sendTimer = sendTimer + dtReal

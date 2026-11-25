@@ -278,7 +278,77 @@ local function setBass(x)
   end
 end
 
+-- ---------------------------------------------------------------- driver head (head tracking)
+-- The pose travels as electrics values, which BeamMP copies to the other players, so every copy of the car turns its
+-- driver's head the same way. The head is a prop on the seated figure: its rotation is set here each frame.
+local headProp, headSaved, headSearched, headPart
+local headNow = {yaw = 0, pitch = 0, roll = 0}
+local headShowTimer = 0
+
+local function setHead(yaw, pitch, roll, on)
+  local e = electrics.values
+  if on then
+    e.bdHeadYaw, e.bdHeadPitch, e.bdHeadRoll = yaw, pitch, roll
+  else
+    e.bdHeadYaw, e.bdHeadPitch, e.bdHeadRoll = nil, nil, nil
+  end
+end
+
+-- the front-most, left-most seated head is taken as the driver's
+local function findHead()
+  headSearched = true
+  local best
+  for _, p in pairs(v.data.props or {}) do
+    if type(p) == "table" and (p.originalMesh or p.mesh) == "character_head" then
+      local node = v.data.nodes[p.idRef]
+      if node and node.pos then
+        local score = node.pos.x * 0.5 - node.pos.y
+        if not best or score > best then best, headProp = score, p end
+      end
+    end
+  end
+  headPart = headProp and headProp.partPath
+end
+
+local function headUpdate(dt)
+  local e = electrics.values
+  if type(e.bdHeadYaw) ~= "number" then
+    if headSaved then
+      local r = headProp.rotation
+      headProp.func, r.x, r.y, r.z = headSaved.func, headSaved.x, headSaved.y, headSaved.z
+      headSaved, e.bdHeadOne = nil, nil
+      headNow.yaw, headNow.pitch, headNow.roll = 0, 0, 0
+    end
+    return
+  end
+  if not headSearched then findHead() end
+  if not headProp then return end
+  if not headSaved then
+    local r = headProp.rotation
+    headSaved = {func = headProp.func, x = r.x, y = r.y, z = r.z}
+  end
+  local a = math.min(1, dt * 14)
+  local function ease(key, value, limit)
+    value = math.max(-limit, math.min(limit, tonumber(value) or 0))
+    headNow[key] = headNow[key] + (value - headNow[key]) * a
+  end
+  ease("yaw", e.bdHeadYaw, 80)
+  ease("pitch", e.bdHeadPitch, 40)
+  ease("roll", e.bdHeadRoll, 30)
+  headProp.func = "bdHeadOne"
+  e.bdHeadOne = 1
+  -- prop axes: x runs up the neck (turn), y points forward (tilt), z points sideways (nod)
+  local r = headProp.rotation
+  r.x, r.y, r.z = -headNow.yaw, headNow.roll, -headNow.pitch
+  headShowTimer = headShowTimer - dt
+  if headShowTimer <= 0 and headPart then
+    headShowTimer = 2
+    obj:queueGameEngineLua(string.format("if beamdeck then beamdeck.showDriver(%d, %q) end", obj:getID(), headPart))
+  end
+end
+
 local function updateGFX(dt)
+  headUpdate(dt)
   mapUpdate(dt)
   lightsUpdate(dt)
   if reinitTimer then
@@ -333,6 +403,7 @@ M.enable = enable
 M.disable = disable
 M.sync = sync
 M.setBass = setBass
+M.setHead = setHead
 M.updateGFX = updateGFX
 M.onPhysicsStep = onPhysicsStep
 M.isEnabled = function() return enabled end
